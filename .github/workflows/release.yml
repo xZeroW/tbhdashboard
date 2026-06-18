@@ -115,7 +115,11 @@ jobs:
           name: release-${{ matrix.target }}
           if-no-files-found: error
           path: |
-            target/${{ matrix.target }}/release/bundle/**/*
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
 
   publish:
     name: Publish GitHub release
