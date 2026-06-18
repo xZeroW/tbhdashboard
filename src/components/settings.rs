@@ -5,6 +5,8 @@ use crate::invoke;
 #[component]
 pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     let (catalog, set_catalog) = signal(None::<invoke::CatalogStatus>);
+    let (assets_root, set_assets_root) = signal(String::new());
+    let (saving, set_saving) = signal(false);
 
     let fetch_catalog = move || {
         spawn_local(async move {
@@ -13,14 +15,34 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         });
     };
 
+    let fetch_assets_root = move || {
+        spawn_local(async move {
+            let root = invoke::invoke_get_assets_root().await;
+            set_assets_root.set(root);
+        });
+    };
+
     Effect::new(move |_| {
         tick.get();
         fetch_catalog();
+        fetch_assets_root();
     });
 
     let (proxy_url, set_proxy_url) = signal("http://127.0.0.1:8080".to_string());
     let (refresh_ms, set_refresh_ms) = signal("500".to_string());
     let (_log_level, set_log_level) = signal("info".to_string());
+
+    let pick_folder = move |_| {
+        spawn_local(async move {
+            if let Some(path) = invoke::invoke_browse_assets_folder().await {
+                set_saving.set(true);
+                invoke::invoke_set_assets_path(&path).await;
+                let root = invoke::invoke_get_assets_root().await;
+                set_assets_root.set(root);
+                set_saving.set(false);
+            }
+        });
+    };
 
     view! {
         <div class="panel-header">
@@ -75,6 +97,18 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
 
             <div class="settings-section">
                 <div class="settings-section-title">"\u{1f4da} Catalog"</div>
+
+                <div class="settings-row column">
+                    <label class="settings-label">"Assets folder"</label>
+                    <div class="settings-row-inline">
+                        <span class="settings-value" style="flex: 1; word-break: break-all;">
+                            {move || assets_root.get()}
+                        </span>
+                        <button class="btn-action" on:click=pick_folder disabled=move || saving.get()>
+                            {move || if saving.get() { "Loading..." } else { "\u{1f4c2} Browse" }}
+                        </button>
+                    </div>
+                </div>
 
                 <div class="settings-row">
                     <label class="settings-label">"Items loaded"</label>

@@ -159,3 +159,29 @@ pub async fn invoke_reload_catalog() -> bool {
     let result = invoke("reload_catalog", args).await;
     result.as_bool().unwrap_or(false)
 }
+
+pub async fn invoke_get_assets_path() -> Option<String> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_assets_path", args).await;
+    result.as_string()
+}
+
+pub async fn invoke_set_assets_path(path: &str) -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "path": path
+    })).unwrap();
+    let result = invoke("set_assets_path", args).await;
+    result.as_bool().unwrap_or(false)
+}
+
+pub async fn invoke_get_assets_root() -> String {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_assets_root", args).await;
+    result.as_string().unwrap_or_default()
+}
+
+pub async fn invoke_browse_assets_folder() -> Option<String> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("browse_assets_folder", args).await;
+    result.as_string()
+}

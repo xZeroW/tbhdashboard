@@ -20,6 +20,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(managed)
         .setup(|app| {
             // Start sidecar on app launch
@@ -40,6 +41,10 @@ pub fn run() {
             commands::get_events,
             commands::get_catalog_status,
             commands::reload_catalog,
+            commands::get_assets_path,
+            commands::set_assets_path,
+            commands::get_assets_root,
+            commands::browse_assets_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -150,6 +150,8 @@ pub struct AppState {
     pub last_added: Option<AddedItemsSnapshot>,
     #[serde(rename = "last_snapshot", skip_serializing_if = "Option::is_none")]
     pub last_snapshot: Option<SnapshotInfo>,
+    #[serde(rename = "assets_path", skip_serializing_if = "Option::is_none")]
+    pub assets_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

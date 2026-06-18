@@ -25,4 +25,5 @@ build/
 .env
 
 Assets/
+# Game assets (shipped separately, not tracked in git)
 src-tauri/Assets/

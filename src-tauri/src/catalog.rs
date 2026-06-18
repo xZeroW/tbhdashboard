@@ -20,7 +20,23 @@ pub struct StaticCatalog {
 impl StaticCatalog {
     pub fn new(root: Option<PathBuf>) -> Self {
         let root = root.unwrap_or_else(assets_root);
-        let text = root.join("Assets").join("TextAsset");
+        let text = root.join("TextAsset");
+
+        let required_files = [
+            "ItemInfoData.txt",
+            "DropInfoData.txt",
+            "StageInfoData.txt",
+            "ItemGroupInfoData.txt",
+        ];
+        for f in &required_files {
+            if !text.join(f).exists() {
+                eprintln!(
+                    "[TBH] Warning: missing required asset: {}",
+                    text.join(f).display()
+                );
+            }
+        }
+
         let mut catalog = Self {
             root,
             items: HashMap::new(),
@@ -46,11 +62,7 @@ impl StaticCatalog {
     }
 
     fn load_items(&mut self) {
-        let path = self
-            .root
-            .join("Assets")
-            .join("TextAsset")
-            .join("ItemInfoData.txt");
+        let path = self.root.join("TextAsset").join("ItemInfoData.txt");
         if !path.exists() {
             eprintln!("[catalog] ItemInfoData.txt not found at {}", path.display());
             return;
@@ -76,7 +88,7 @@ impl StaticCatalog {
     }
 
     fn load_display_names(&mut self) {
-        let mb = self.root.join("Assets").join("MonoBehaviour");
+        let mb = self.root.join("MonoBehaviour");
         if !mb.exists() {
             return;
         }
@@ -135,11 +147,7 @@ impl StaticCatalog {
     }
 
     fn load_groups(&mut self) {
-        let path = self
-            .root
-            .join("Assets")
-            .join("TextAsset")
-            .join("ItemGroupInfoData.txt");
+        let path = self.root.join("TextAsset").join("ItemGroupInfoData.txt");
         if !path.exists() {
             eprintln!(
                 "[catalog] ItemGroupInfoData.txt not found at {}",
@@ -160,11 +168,7 @@ impl StaticCatalog {
     }
 
     fn load_drops(&mut self) {
-        let path = self
-            .root
-            .join("Assets")
-            .join("TextAsset")
-            .join("DropInfoData.txt");
+        let path = self.root.join("TextAsset").join("DropInfoData.txt");
         if !path.exists() {
             eprintln!(
                 "[catalog] DropInfoData.txt not found at {}",
@@ -189,11 +193,7 @@ impl StaticCatalog {
     }
 
     fn load_stages(&mut self) {
-        let path = self
-            .root
-            .join("Assets")
-            .join("TextAsset")
-            .join("StageInfoData.txt");
+        let path = self.root.join("TextAsset").join("StageInfoData.txt");
         if !path.exists() {
             eprintln!(
                 "[catalog] StageInfoData.txt not found at {}",

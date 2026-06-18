@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use tauri::Manager;
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 
 use crate::catalog::StaticCatalog;
 use crate::chests;
@@ -17,9 +19,12 @@ pub struct ManagedState {
 
 impl ManagedState {
     pub fn new() -> Self {
+        let repo = StateRepository::new(config::state_path());
+        let saved = repo.load();
+        let root = saved.assets_path.as_deref().map(std::path::PathBuf::from);
         Self {
-            repo: StateRepository::new(config::state_path()),
-            catalog: Mutex::new(StaticCatalog::new(None)),
+            repo,
+            catalog: Mutex::new(StaticCatalog::new(root)),
         }
     }
 
@@ -172,6 +177,58 @@ pub fn reload_catalog(
     state: State<'_, ManagedState>,
 ) -> bool {
     let mut catalog = state.catalog.lock().unwrap();
-    *catalog = StaticCatalog::new(None);
+    let saved = state.repo().load();
+    let root = saved.assets_path.as_deref().map(std::path::PathBuf::from);
+    *catalog = StaticCatalog::new(root);
     catalog.valid
+}
+
+// ---- Assets path ----
+
+#[tauri::command]
+pub fn get_assets_path(
+    state: State<'_, ManagedState>,
+) -> Option<String> {
+    state.repo().load().assets_path
+}
+
+#[tauri::command]
+pub fn set_assets_path(
+    state: State<'_, ManagedState>,
+    path: String,
+) -> bool {
+    let mut state_data = state.repo().load();
+    state_data.assets_path = Some(path);
+    let _ = state.repo().save(&state_data);
+
+    let root = state_data.assets_path.as_deref().map(std::path::PathBuf::from);
+    let mut catalog = state.catalog.lock().unwrap();
+    *catalog = StaticCatalog::new(root);
+    catalog.valid
+}
+
+#[tauri::command]
+pub fn get_assets_root(
+    state: State<'_, ManagedState>,
+) -> String {
+    let saved = state.repo().load();
+    match saved.assets_path {
+        Some(ref p) => p.clone(),
+        None => config::assets_root().to_string_lossy().into_owned(),
+    }
+}
+
+#[tauri::command]
+pub async fn browse_assets_folder(window: tauri::Window) -> Option<String> {
+    let handle = window.app_handle().clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    handle
+        .dialog()
+        .file()
+        .set_title("Select Assets Folder")
+        .pick_folder(move |path: Option<tauri_plugin_dialog::FilePath>| {
+            let _ = tx.send(path);
+        });
+    let path = rx.recv().ok().flatten()?;
+    path.into_path().ok().map(|p| p.to_string_lossy().into_owned())
 }
