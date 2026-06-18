@@ -1,4 +1,5 @@
 mod catalog;
+mod chests;
 mod config;
 mod models;
 mod state;
