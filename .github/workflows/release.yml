@@ -48,7 +48,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Trunk
-        uses: dtolnay/install-trunk@main
+        run: cargo install trunk --locked
 
       - name: Setup Python
         uses: actions/setup-python@v5
