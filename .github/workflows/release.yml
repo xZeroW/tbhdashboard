@@ -63,6 +63,7 @@ jobs:
           pushd sidecar
           python -m nuitka \
             --mode=onefile \
+            --assume-yes-for-downloads \
             --output-filename=tbhd-sidecar \
             --include-package=mitmproxy \
             --include-package=mitmproxy.tools \
