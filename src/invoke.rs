@@ -18,16 +18,20 @@ pub struct ChestRow {
     pub claim: Option<String>,
     pub key: Option<String>,
     pub box_label: String,
+    #[serde(rename = "rewardId")]
     pub reward_id: Option<i64>,
     pub rarity: String,
     pub name: String,
+    #[serde(rename = "isGet")]
     pub is_get: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AddedItem {
     pub at: String,
+    #[serde(rename = "itemId")]
     pub item_id: Option<i64>,
+    #[serde(rename = "itemKey")]
     pub item_key: String,
     pub count: i32,
     pub rarity: String,
@@ -43,8 +47,10 @@ pub struct AddedItemsSnapshot {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProcessBoxCreatedItem {
+    #[serde(rename = "itemId")]
     pub item_id: Option<i64>,
     pub count: i32,
+    #[serde(rename = "dropKey")]
     pub drop_key: Option<i64>,
     pub name: String,
 }
@@ -52,6 +58,7 @@ pub struct ProcessBoxCreatedItem {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProcessBoxInfo {
     pub tn: Option<serde_json::Value>,
+    #[serde(rename = "isReset")]
     pub is_reset: bool,
     pub created: Vec<ProcessBoxCreatedItem>,
     pub at: String,
@@ -80,6 +87,42 @@ pub struct CatalogStatus {
     pub items_count: usize,
     pub stages_count: usize,
     pub display_names_count: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProxyStatus {
+    pub running: bool,
+    pub state: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AppSettings {
+    pub refresh_ms: u32,
+    pub log_level: String,
+    pub proxy_url: String,
+    pub include_steam_launch_options: bool,
+    pub steam_launch_options: String,
+    pub launch_game_on_start: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LaunchGameResult {
+    pub ok: bool,
+    pub message: String,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            refresh_ms: 500,
+            log_level: "info".to_string(),
+            proxy_url: "http://127.0.0.1:8080".to_string(),
+            include_steam_launch_options: false,
+            steam_launch_options: String::new(),
+            launch_game_on_start: false,
+        }
+    }
 }
 
 // ---- Invoke helpers ----
@@ -152,6 +195,35 @@ pub async fn invoke_get_catalog_status() -> Option<CatalogStatus> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("get_catalog_status", args).await;
     serde_wasm_bindgen::from_value(result).ok()
+}
+
+pub async fn invoke_get_proxy_status() -> Option<ProxyStatus> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_proxy_status", args).await;
+    serde_wasm_bindgen::from_value(result).ok()
+}
+
+pub async fn invoke_get_settings() -> AppSettings {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_settings", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_set_settings(settings: AppSettings) -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "settings": settings
+    })).unwrap();
+    let result = invoke("set_settings", args).await;
+    result.as_bool().unwrap_or(false)
+}
+
+pub async fn invoke_launch_game() -> LaunchGameResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("launch_game", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(LaunchGameResult {
+        ok: false,
+        message: "Failed to read launch result".to_string(),
+    })
 }
 
 pub async fn invoke_reload_catalog() -> bool {

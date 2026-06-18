@@ -9,11 +9,12 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
     let (_summary, set_summary) = signal(std::collections::HashMap::<String, usize>::new());
     let (filter_tab, set_filter_tab) = signal("ALL".to_string());
     let (show_claimable_only, set_show_claimable_only) = signal(false);
+    let (show_claimed, set_show_claimed) = signal(false);
 
     let fetch_data = move || {
-        let show = show_claimable_only.get();
+        let include_claimed = show_claimed.get();
         spawn_local(async move {
-            let data = invoke::invoke_get_chest_rows(show).await;
+            let data = invoke::invoke_get_chest_rows(include_claimed).await;
             set_rows.set(data);
             let sum = invoke::invoke_get_box_summary().await;
             set_summary.set(sum);
@@ -22,12 +23,21 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
 
     Effect::new(move |_| {
         tick.get();
+        show_claimed.track();
         fetch_data();
     });
 
     let filtered_rows = move || {
         let tab = filter_tab.get();
+        let only_claimable = show_claimable_only.get();
+        let show_claimed = show_claimed.get();
         rows.get().into_iter().filter(|r| {
+            if r.is_get && !show_claimed {
+                return false;
+            }
+            if only_claimable && r.remaining > 0.0 {
+                return false;
+            }
             match tab.as_str() {
                 "Common" => r.box_label.contains("Common"),
                 "Stage" => r.box_label.contains("Stage"),
@@ -49,10 +59,21 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
         <div class="panel-header">
             <div class="panel-title">"CHEST QUEUE"</div>
             <div class="toggle-row">
-                <span>"Show Claimable Only"</span>
-                <input type="checkbox" prop:checked=show_claimable_only on:change=move |ev| {
-                    set_show_claimable_only.set(event_target_checked(&ev));
-                }/>
+                <span>"Claimable Only"</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" prop:checked=show_claimable_only on:change=move |ev| {
+                        set_show_claimable_only.set(event_target_checked(&ev));
+                    }/>
+                    <span class="slider"></span>
+                </label>
+                <span class="toggle-sep"></span>
+                <span>"Show Claimed"</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" prop:checked=show_claimed on:change=move |ev| {
+                        set_show_claimed.set(event_target_checked(&ev));
+                    }/>
+                    <span class="slider"></span>
+                </label>
             </div>
         </div>
 
@@ -114,7 +135,9 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                                     </div>
                                 </td>
                                 <td>
-                                    {if is_ready {
+                                    {if row.is_get {
+                                        view! { <span class="pill purple"><span class="pill-dot">"\u{2714}\u{fe0f}"</span> " Claimed"</span> }.into_any()
+                                    } else if is_ready {
                                         view! { <span class="pill green"><span class="pill-dot">"\u{25cf}"</span> " Claimable"</span> }.into_any()
                                     } else {
                                         view! { <span class="pill gray"><span class="pill-dot">"\u{1f512}"</span> " Waiting"</span> }.into_any()

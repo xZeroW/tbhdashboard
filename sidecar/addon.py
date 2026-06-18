@@ -235,12 +235,14 @@ def emit(event_type, **kwargs):
 # mitmproxy addon entry point
 # ---------------------------------------------------------------------------
 
+print("[TBH-sidecar] addon loaded, waiting for traffic...", file=sys.stderr, flush=True)
+
 def response(flow: http.HTTPFlow):
     """Called for every HTTP response passing through the proxy."""
     try:
         _handle_response(flow)
     except Exception as e:
-        print(f"[TBH-sidecar] addon error: {e}", file=sys.stderr)
+        print(f"[TBH-sidecar] addon error: {e}", file=sys.stderr, flush=True)
 
 
 def _handle_response(flow: http.HTTPFlow):

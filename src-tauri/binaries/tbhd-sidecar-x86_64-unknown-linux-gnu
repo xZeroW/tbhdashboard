@@ -1,0 +1,6 @@
+#!/bin/bash
+# Dev wrapper — runs the Python sidecar directly without Nuitka compilation.
+# Replace this file with the Nuitka binary for production builds.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SIDECAR_DIR="$(cd "$SCRIPT_DIR/../../sidecar" && pwd)"
+exec python3 "$SIDECAR_DIR/main.py" "$@"

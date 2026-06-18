@@ -30,9 +30,15 @@ pub fn RerollPreview(tick: ReadSignal<u32>) -> impl IntoView {
 
     let filtered_rows = move || {
         let filt = filter_rarity.get();
+        let min_idx = RARITY_OPTIONS.iter().position(|&r| r == filt);
         let mut display: Vec<invoke::ChestRow> = rows.get()
             .into_iter()
-            .filter(|r| filt == "ALL" || r.rarity == filt)
+            .filter(|r| {
+                filt == "ALL" || match min_idx {
+                    Some(mi) => RARITY_OPTIONS.iter().position(|&x| x == r.rarity).map(|ri| ri >= mi).unwrap_or(false),
+                    None => false,
+                }
+            })
             .collect();
         display.sort_by(|a, b| a.remaining.partial_cmp(&b.remaining).unwrap_or(std::cmp::Ordering::Equal));
         display
@@ -55,13 +61,13 @@ pub fn RerollPreview(tick: ReadSignal<u32>) -> impl IntoView {
         </div>
 
         <div class="filter-row">
-            <label>"Filter rarity"
-                <select on:change=move |ev| {
+            <label style="color: #e2e8f0; font-size: 13px;">"Filter rarity"
+                <select style="appearance: none; -webkit-appearance: none; -moz-appearance: none; background: #1a2230; color: #ffffff; font-weight: 600; border: 1px solid #3b82f6; border-radius: 6px; padding: 6px 28px 6px 12px; font-size: 13px; outline: none; cursor: pointer;" on:change=move |ev| {
                     set_filter_rarity.set(event_target_value(&ev));
                 }>
-                    <option value="ALL">"ALL"</option>
+                    <option value="ALL" style="background: #131921; color: #ffffff;">"ALL"</option>
                     {RARITY_OPTIONS.iter().map(|&r| {
-                        view! { <option value=r>{r}</option> }
+                        view! { <option value=r style="background: #131921; color: #ffffff;">{r}</option> }
                     }).collect::<Vec<_>>()}
                 </select>
             </label>

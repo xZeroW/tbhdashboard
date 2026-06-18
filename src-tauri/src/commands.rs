@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 use tauri::State;
@@ -11,10 +12,36 @@ use crate::config;
 use crate::models::*;
 use crate::state::StateRepository;
 
+const STEAM_APP_ID: &str = "3678970";
+
 /// Shared app state managed by Tauri.
 pub struct ManagedState {
     repo: StateRepository,
     pub catalog: Mutex<StaticCatalog>,
+    proxy_status: Arc<Mutex<ProxyStatus>>,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct ProxyStatus {
+    pub running: bool,
+    pub state: String,
+    pub message: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct LaunchGameResult {
+    pub ok: bool,
+    pub message: String,
+}
+
+impl ProxyStatus {
+    pub fn starting() -> Self {
+        Self {
+            running: false,
+            state: "starting".to_string(),
+            message: "Starting".to_string(),
+        }
+    }
 }
 
 impl ManagedState {
@@ -25,11 +52,185 @@ impl ManagedState {
         Self {
             repo,
             catalog: Mutex::new(StaticCatalog::new(root)),
+            proxy_status: Arc::new(Mutex::new(ProxyStatus::starting())),
         }
     }
 
     pub fn repo(&self) -> &StateRepository {
         &self.repo
+    }
+
+    pub fn proxy_status(&self) -> Arc<Mutex<ProxyStatus>> {
+        self.proxy_status.clone()
+    }
+}
+
+#[tauri::command]
+pub fn get_proxy_status(state: State<'_, ManagedState>) -> ProxyStatus {
+    state.proxy_status.lock().unwrap().clone()
+}
+
+// ---- Settings ----
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, ManagedState>) -> AppSettings {
+    normalize_settings(state.repo().load().settings)
+}
+
+#[tauri::command]
+pub fn set_settings(state: State<'_, ManagedState>, settings: AppSettings) -> bool {
+    let mut state_data = state.repo().load();
+    state_data.settings = normalize_settings(settings);
+    state.repo().save(&state_data).is_ok()
+}
+
+fn normalize_settings(mut settings: AppSettings) -> AppSettings {
+    let linux_default = "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%";
+    let windows_default = "cmd /c \"set HTTP_PROXY=http://127.0.0.1:8080 && set HTTPS_PROXY=http://127.0.0.1:8080 && %command%\"";
+    let current_default = default_steam_launch_options();
+    let current = settings.steam_launch_options.trim();
+
+    if current.is_empty() || (cfg!(target_os = "windows") && current == linux_default) || (!cfg!(target_os = "windows") && current == windows_default) {
+        settings.steam_launch_options = current_default;
+    }
+
+    settings
+}
+
+#[tauri::command]
+pub fn launch_game(state: State<'_, ManagedState>) -> LaunchGameResult {
+    let settings = state.repo().load().settings;
+    launch_game_from_settings(&settings)
+}
+
+pub fn launch_game_from_settings(settings: &AppSettings) -> LaunchGameResult {
+    let settings = normalize_settings(settings.clone());
+    match launch_steam_app(&settings) {
+        Ok(()) => LaunchGameResult {
+            ok: true,
+            message: "Launch request sent to Steam".to_string(),
+        },
+        Err(err) => LaunchGameResult {
+            ok: false,
+            message: err,
+        },
+    }
+}
+
+fn launch_steam_app(settings: &AppSettings) -> Result<(), String> {
+    let options = settings.steam_launch_options.trim();
+    let args = if settings.include_steam_launch_options && !options.is_empty() {
+        split_launch_options(options)?
+    } else {
+        Vec::new()
+    };
+    open_steam_app(&args)
+}
+
+fn split_launch_options(value: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for ch in value.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if let Some(quote_ch) = quote {
+            if ch == quote_ch {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            ch if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if escaped {
+        current.push('\\');
+    }
+
+    if quote.is_some() {
+        return Err("Steam launch options have an unclosed quote".to_string());
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+
+    Ok(args)
+}
+
+#[cfg(target_os = "windows")]
+fn open_steam_app(args: &[String]) -> Result<(), String> {
+    let direct = Command::new("steam")
+        .arg("-applaunch")
+        .arg(STEAM_APP_ID)
+        .args(args)
+        .spawn();
+    if direct.is_ok() {
+        return Ok(());
+    }
+
+    if args.is_empty() {
+        Command::new("cmd")
+            .args(["/C", "start", "", &format!("steam://run/{STEAM_APP_ID}")])
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("Failed to ask Steam to launch: {err}"))
+    } else {
+        Err("Custom launch options require steam.exe to be available on PATH".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn open_steam_app(args: &[String]) -> Result<(), String> {
+    Command::new("open")
+        .args(["-a", "Steam", "--args", "-applaunch", STEAM_APP_ID])
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Failed to ask Steam to launch: {err}"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_steam_app(args: &[String]) -> Result<(), String> {
+    match Command::new("steam")
+        .arg("-applaunch")
+        .arg(STEAM_APP_ID)
+        .args(args)
+        .spawn()
+    {
+        Ok(_) => Ok(()),
+        Err(steam_err) if args.is_empty() => {
+            Command::new("xdg-open")
+                .arg(format!("steam://run/{STEAM_APP_ID}"))
+                .spawn()
+                .map(|_| ())
+                .map_err(|xdg_err| {
+                    format!("Failed to ask Steam to launch: steam: {steam_err}; xdg-open: {xdg_err}")
+                })
+        }
+        Err(steam_err) => Err(format!("Failed to run Steam directly: {steam_err}")),
     }
 }
 

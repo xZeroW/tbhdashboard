@@ -138,6 +138,61 @@ pub struct StateEvent {
 }
 
 /// Top-level application state, persisted as JSON.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AppSettings {
+    #[serde(default = "default_refresh_ms")]
+    pub refresh_ms: u32,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+    #[serde(default = "default_proxy_url")]
+    pub proxy_url: String,
+    #[serde(default)]
+    pub include_steam_launch_options: bool,
+    #[serde(default = "default_steam_launch_options")]
+    pub steam_launch_options: String,
+    #[serde(default)]
+    pub launch_game_on_start: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            refresh_ms: default_refresh_ms(),
+            log_level: default_log_level(),
+            proxy_url: default_proxy_url(),
+            include_steam_launch_options: false,
+            steam_launch_options: default_steam_launch_options(),
+            launch_game_on_start: false,
+        }
+    }
+}
+
+fn default_refresh_ms() -> u32 {
+    500
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
+fn default_proxy_url() -> String {
+    "http://127.0.0.1:8080".to_string()
+}
+
+pub fn default_steam_launch_options() -> String {
+    default_steam_launch_options_for_os()
+}
+
+#[cfg(target_os = "windows")]
+fn default_steam_launch_options_for_os() -> String {
+    "cmd /c \"set HTTP_PROXY=http://127.0.0.1:8080 && set HTTPS_PROXY=http://127.0.0.1:8080 && %command%\"".to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn default_steam_launch_options_for_os() -> String {
+    "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%".to_string()
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AppState {
     #[serde(default)]
@@ -152,6 +207,8 @@ pub struct AppState {
     pub last_snapshot: Option<SnapshotInfo>,
     #[serde(rename = "assets_path", skip_serializing_if = "Option::is_none")]
     pub assets_path: Option<String>,
+    #[serde(default)]
+    pub settings: AppSettings,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

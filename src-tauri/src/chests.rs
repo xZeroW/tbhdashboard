@@ -195,6 +195,7 @@ pub fn get_rows(
         a.remaining
             .partial_cmp(&b.remaining)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
     });
     rows
 }

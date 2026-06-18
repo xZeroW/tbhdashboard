@@ -17,3 +17,10 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 
 [workspace]
 members = ["src-tauri"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

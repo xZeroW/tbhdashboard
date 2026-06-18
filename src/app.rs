@@ -1,6 +1,7 @@
+use crate::components;
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::components;
 
 pub fn rarity_class(rarity: &str) -> &'static str {
     match rarity {
@@ -57,7 +58,9 @@ pub fn rarity_title(rarity: &str) -> String {
                     let upper = first.to_uppercase();
                     let mut s: String = upper.collect();
                     for c in chars {
-                        for lc in c.to_lowercase() { s.push(lc); }
+                        for lc in c.to_lowercase() {
+                            s.push(lc);
+                        }
                     }
                     s
                 }
@@ -66,12 +69,47 @@ pub fn rarity_title(rarity: &str) -> String {
     }
 }
 
-pub fn rarity_diamond(_rarity: &str) -> &'static str { "\u{2666}" }
+pub fn rarity_diamond(_rarity: &str) -> &'static str {
+    "\u{2666}"
+}
+
+fn rarity_rank(rarity: &str) -> usize {
+    match rarity {
+        "COMMON" => 1,
+        "UNCOMMON" => 2,
+        "RARE" => 3,
+        "EPIC" => 4,
+        "LEGENDARY" => 5,
+        "IMMORTAL" => 6,
+        "ARCANA" => 7,
+        "BEYOND" => 8,
+        "CELESTIAL" => 9,
+        "DIVINE" => 10,
+        "COSMIC" => 11,
+        _ => 0,
+    }
+}
+
+fn format_remaining(seconds: f64) -> String {
+    if seconds <= 0.0 {
+        return "--".to_string();
+    }
+
+    let secs = seconds.ceil() as i64;
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
 
 pub fn chest_emoji(box_label: &str) -> &'static str {
-    if box_label.contains("Stage") { "\u{1f3f0}\u{fe0f}" }
-    else if box_label.contains("Boss") { "\u{1f409}" }
-    else { "\u{1f4e6}" }
+    if box_label.contains("Stage") {
+        "\u{1f3f0}\u{fe0f}"
+    } else if box_label.contains("Boss") {
+        "\u{1f409}"
+    } else {
+        "\u{1f4e6}"
+    }
 }
 
 pub fn reward_emoji(rarity: &str) -> &'static str {
@@ -111,15 +149,25 @@ const TAB_DEFS: &[(Tab, &str, &str)] = &[
 ];
 
 fn tab_title(tab: &Tab) -> &'static str {
-    TAB_DEFS.iter().find(|(t, _, _)| *t == *tab).map(|(_, l, _)| *l).unwrap_or("")
+    TAB_DEFS
+        .iter()
+        .find(|(t, _, _)| *t == *tab)
+        .map(|(_, l, _)| *l)
+        .unwrap_or("")
 }
 
-fn cs(classes: &str) -> String { classes.to_string() }
+fn cs(classes: &str) -> String {
+    classes.to_string()
+}
 
 #[component]
 pub fn App() -> impl IntoView {
     let (active_tab, set_active_tab) = signal(Tab::ChestQueue);
     let (tick, set_tick) = signal(0u32);
+    let (proxy_status, set_proxy_status) = signal(None::<invoke::ProxyStatus>);
+    let (chest_rows, set_chest_rows) = signal(Vec::<invoke::ChestRow>::new());
+    let (launching_game, set_launching_game) = signal(false);
+    let (launch_status, set_launch_status) = signal(None::<invoke::LaunchGameResult>);
 
     spawn_local(async move {
         loop {
@@ -128,7 +176,89 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    Effect::new(move |_| {
+        tick.get();
+        spawn_local(async move {
+            set_proxy_status.set(invoke::invoke_get_proxy_status().await);
+        });
+    });
+
+    Effect::new(move |_| {
+        tick.get();
+        spawn_local(async move {
+            set_chest_rows.set(invoke::invoke_get_chest_rows(false).await);
+        });
+    });
+
     let _view_title = move || tab_title(&active_tab.get());
+    let common_chests = move || {
+        chest_rows
+            .get()
+            .iter()
+            .filter(|row| row.box_label.contains("Common"))
+            .count()
+    };
+    let stage_chests = move || {
+        chest_rows
+            .get()
+            .iter()
+            .filter(|row| row.box_label.contains("Stage"))
+            .count()
+    };
+    let claimable_chests = move || {
+        chest_rows
+            .get()
+            .iter()
+            .filter(|row| row.remaining <= 0.0)
+            .count()
+    };
+    let next_unlock = move || {
+        chest_rows
+            .get()
+            .iter()
+            .filter(|row| row.remaining > 0.0)
+            .map(|row| row.remaining)
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(format_remaining)
+            .unwrap_or_else(|| "--:--:--".to_string())
+    };
+    let next_unlock_sub = move || {
+        chest_rows
+            .get()
+            .iter()
+            .filter(|row| row.remaining > 0.0)
+            .min_by(|a, b| {
+                a.remaining
+                    .partial_cmp(&b.remaining)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|row| row.box_label.clone())
+            .unwrap_or_else(|| "No waiting chest".to_string())
+    };
+    let best_rarity = move || {
+        chest_rows
+            .get()
+            .iter()
+            .max_by_key(|row| rarity_rank(&row.rarity))
+            .map(|row| rarity_title(&row.rarity))
+            .unwrap_or_else(|| "--".to_string())
+    };
+    let best_rarity_color = move || {
+        chest_rows
+            .get()
+            .iter()
+            .max_by_key(|row| rarity_rank(&row.rarity))
+            .map(|row| rarity_color(&row.rarity))
+            .unwrap_or("var(--red)")
+    };
+    let best_rarity_sub = move || {
+        chest_rows
+            .get()
+            .iter()
+            .max_by_key(|row| rarity_rank(&row.rarity))
+            .map(|row| row.name.clone())
+            .unwrap_or_else(|| "In Queue".to_string())
+    };
 
     view! {
         <div class="app-root">
@@ -165,8 +295,15 @@ pub fn App() -> impl IntoView {
                 <div class="header-bar">
                     <div class="header-status">
                         <span class="header-label">"Proxy:"</span>
-                        <span class=cs("status-dot green")></span>
-                        <span class="header-val">"Running"</span>
+                        <span class="status-dot" class:green=move || proxy_status.get().map(|s| s.running).unwrap_or(false) class:amber=move || proxy_status.get().map(|s| s.state == "starting").unwrap_or(true) class:red=move || proxy_status.get().map(|s| !s.running && s.state != "starting").unwrap_or(false)></span>
+                        <span class="header-val" style:color=move || {
+                            match proxy_status.get() {
+                                Some(s) if s.running => "var(--green)",
+                                Some(s) if s.state == "starting" => "var(--amber)",
+                                Some(_) => "var(--red)",
+                                None => "var(--amber)",
+                            }
+                        }>{move || proxy_status.get().map(|s| s.message).unwrap_or_else(|| "Starting".to_string())}</span>
                     </div>
                     <div class="header-status">
                         <span class="header-label">"Game Data:"</span>
@@ -176,8 +313,32 @@ pub fn App() -> impl IntoView {
                         <span class="header-label">"Last Updated:"</span>
                         <span class="header-val amber">"--:--:--"</span>
                     </div>
-                    <div class="header-icon" title="Refresh" style="font-size: 24px;">"\u{21bb}"</div>
+                    <div class="header-status" style:display=move || if launch_status.get().is_some() { "flex" } else { "none" }>
+                        <span class="header-label">"Game:"</span>
+                        <span class="header-val" style:color=move || {
+                            match launch_status.get() {
+                                Some(result) if result.ok => "var(--green)",
+                                Some(_) => "var(--red)",
+                                None => "var(--text-dim)",
+                            }
+                        }>{move || launch_status.get().map(|result| result.message).unwrap_or_default()}</span>
+                    </div>
+                    <div class="header-icon disabled" title="Auto-refresh is enabled" style="font-size: 24px;">"\u{21bb}"</div>
                     <div class="header-icon" title="Settings" style="cursor: pointer;" on:click=move |_| set_active_tab.set(Tab::Settings)>"\u{1f527}"</div>
+                    <button class="header-icon play-button" title="Run Game" disabled=move || launching_game.get() on:click=move |_| {
+                        if launching_game.get() {
+                            return;
+                        }
+                        set_launching_game.set(true);
+                        set_launch_status.set(None);
+                        spawn_local(async move {
+                            let result = invoke::invoke_launch_game().await;
+                            set_launch_status.set(Some(result));
+                            set_launching_game.set(false);
+                        });
+                    }>
+                        {move || if launching_game.get() { "..." } else { "\u{25b6}" }}
+                    </button>
                 </div>
 
                 <div class="stat-cards">
@@ -185,7 +346,7 @@ pub fn App() -> impl IntoView {
                         <div class="card-icon">"\u{1f4e6}"</div>
                         <div class="card-info">
                             <div class="card-label">"COMMON CHESTS"</div>
-                            <div class="card-value" style="color: var(--text)">"--"</div>
+                            <div class="card-value" style="color: var(--text)">{move || common_chests().to_string()}</div>
                             <div class=cs("card-sub dim")>"In Queue"</div>
                         </div>
                     </div>
@@ -193,7 +354,7 @@ pub fn App() -> impl IntoView {
                         <div class="card-icon">"\u{1f3f0}\u{fe0f}"</div>
                         <div class="card-info">
                             <div class="card-label">"STAGE CHESTS"</div>
-                            <div class="card-value" style="color: var(--text)">"--"</div>
+                            <div class="card-value" style="color: var(--text)">{move || stage_chests().to_string()}</div>
                             <div class=cs("card-sub dim")>"In Queue"</div>
                         </div>
                     </div>
@@ -201,7 +362,7 @@ pub fn App() -> impl IntoView {
                         <div class="card-icon">"\u{2705}"</div>
                         <div class="card-info">
                             <div class="card-label">"CLAIMABLE"</div>
-                            <div class="card-value" style="color: var(--green)">"--"</div>
+                            <div class="card-value" style="color: var(--green)">{move || claimable_chests().to_string()}</div>
                             <div class="card-sub">"Claim now!"</div>
                         </div>
                     </div>
@@ -209,16 +370,16 @@ pub fn App() -> impl IntoView {
                         <div class="card-icon">"\u{23f3}"</div>
                         <div class="card-info">
                             <div class="card-label">"NEXT UNLOCK"</div>
-                            <div class="card-value" style="color: var(--purple)">"--:--:--"</div>
-                            <div class=cs("card-sub dim")>"No waiting chest"</div>
+                            <div class="card-value" style="color: var(--purple)">{next_unlock}</div>
+                            <div class=cs("card-sub dim")>{next_unlock_sub}</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="card-icon">"\u{1f451}"</div>
                         <div class="card-info">
                             <div class="card-label">"BEST RARITY"</div>
-                            <div class="card-value" style="color: var(--red)">"--"</div>
-                            <div class=cs("card-sub dim")>"In Queue"</div>
+                            <div class="card-value" style:color=best_rarity_color>{best_rarity}</div>
+                            <div class=cs("card-sub dim")>{best_rarity_sub}</div>
                         </div>
                     </div>
                 </div>

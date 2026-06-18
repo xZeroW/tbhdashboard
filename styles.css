@@ -77,8 +77,15 @@ body { overflow: hidden; height: 100vh; }
     width: 8px; height: 8px; border-radius: 50%;
     display: inline-block;
 }
+.status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block;
+}
 .header-bar .status-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .header-bar .status-dot.red { background: var(--red); }
+.status-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-dot.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.status-dot.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
 .header-bar .header-label { color: var(--text-dim); }
 .header-bar .header-val { color: var(--green); font-weight: 600; }
 .header-bar .header-val.amber { color: var(--amber); }
@@ -90,6 +97,28 @@ body { overflow: hidden; height: 100vh; }
 }
 .header-bar .header-icon:hover { background: var(--bg-hover); color: var(--text); }
 .header-bar .header-icon + .header-icon { margin-left: -8px; }
+.header-bar .header-icon.disabled,
+.header-bar .header-icon.disabled:hover {
+    cursor: default;
+    opacity: 0.45;
+    background: var(--bg-input);
+    color: var(--text-muted);
+}
+.header-bar button.header-icon {
+    font-family: inherit;
+}
+.header-bar button.header-icon:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+.header-bar .play-button {
+    color: var(--green);
+    border-color: rgba(34, 197, 94, 0.35);
+}
+.header-bar .play-button:hover:not(:disabled) {
+    background: rgba(34, 197, 94, 0.14);
+    color: #fff;
+}
 
 /* ============ Sidebar ============ */
 .sidebar {
@@ -215,8 +244,33 @@ body { overflow: hidden; height: 100vh; }
     color: var(--text); letter-spacing: 0.5px;
 }
 .toggle-row {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 12px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--text-dim);
+}
+.toggle-sep {
+    width: 1px; height: 18px; background: var(--border); margin: 0 4px;
+}
+.toggle-switch {
+    position: relative; width: 40px; height: 22px; flex-shrink: 0;
+}
+.toggle-switch input {
+    opacity: 0; width: 0; height: 0; position: absolute;
+}
+.toggle-switch .slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: var(--bg-active); border-radius: 22px; border: 1px solid var(--border);
+    transition: background 0.2s, border-color 0.2s;
+}
+.toggle-switch .slider::before {
+    content: ""; position: absolute; left: 3px; top: 3px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--text-dim); transition: transform 0.2s, background 0.2s;
+}
+.toggle-switch input:checked + .slider {
+    background: rgba(168,85,247,0.25); border-color: var(--purple);
+}
+.toggle-switch input:checked + .slider::before {
+    transform: translateX(18px); background: var(--purple);
 }
 
 /* ============ Filter Tabs ============ */
@@ -292,6 +346,7 @@ body { overflow: hidden; height: 100vh; }
 }
 .pill.green { background: rgba(34,197,94,0.15); color: var(--green); }
 .pill.gray { background: rgba(136,153,170,0.12); color: var(--text-dim); }
+.pill.purple { background: rgba(168,85,247,0.15); color: var(--purple); }
 .pill .pill-dot { font-size: 8px; }
 
 /* Rarity badge */
@@ -332,8 +387,11 @@ body { overflow: hidden; height: 100vh; }
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--bg-input);
-    color: var(--text);
-    font-size: 12px; outline: none;
+    color: #fff;
+    font-size: 12px; font-weight: 500; outline: none;
+}
+.filter-row select option {
+    background: var(--bg-card); color: #fff;
 }
 .filter-row select:focus,
 .filter-row input[type="number"]:focus {
@@ -453,9 +511,20 @@ body { overflow: hidden; height: 100vh; }
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--bg-input);
-    color: var(--text);
-    font-size: 12px; outline: none;
+    color: #fff;
+    font-size: 12px; font-weight: 500; outline: none;
     flex: 1; max-width: 240px;
+}
+.settings-section input.settings-wide-input {
+    width: 100%;
+    max-width: none;
+}
+.settings-section input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.settings-section select option {
+    background: var(--bg-card); color: #fff;
 }
 .settings-section input:focus,
 .settings-section select:focus {

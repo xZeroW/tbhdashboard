@@ -25,12 +25,22 @@ pub fn run() {
         .setup(|app| {
             // Start sidecar on app launch
             let state = app.state::<ManagedState>();
-            let mut sidecar = SidecarManager::new();
+            let mut sidecar = SidecarManager::new(state.proxy_status());
             sidecar.start(app.handle(), state.repo());
             app.manage(Mutex::new(sidecar));
+
+            let settings = state.repo().load().settings;
+            if settings.launch_game_on_start {
+                let _ = commands::launch_game_from_settings(&settings);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_proxy_status,
+            commands::get_settings,
+            commands::set_settings,
+            commands::launch_game,
             commands::get_chest_rows,
             commands::get_box_summary,
             commands::mark_opened,
