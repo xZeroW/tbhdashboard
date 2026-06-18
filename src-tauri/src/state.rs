@@ -5,7 +5,7 @@ use crate::models::{AppState, StateEvent};
 use crate::utils::utc_now_iso;
 
 pub struct StateRepository {
-    path: PathBuf,
+    pub path: PathBuf,
 }
 
 impl StateRepository {
