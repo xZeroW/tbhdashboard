@@ -1,0 +1,161 @@
+use wasm_bindgen::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"])]
+    pub async fn invoke(cmd: &str, args: JsValue) -> JsValue;
+
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"])]
+    pub async fn listen(event: &str, handler: &JsValue) -> JsValue;
+}
+
+// ---- Types matching Rust Tauri command return types ----
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ChestRow {
+    pub remaining: f64,
+    pub claim: Option<String>,
+    pub key: Option<String>,
+    pub box_label: String,
+    pub reward_id: Option<i64>,
+    pub rarity: String,
+    pub name: String,
+    pub is_get: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AddedItem {
+    pub at: String,
+    pub item_id: Option<i64>,
+    pub item_key: String,
+    pub count: i32,
+    pub rarity: String,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AddedItemsSnapshot {
+    pub at: String,
+    pub source: String,
+    pub items: Vec<AddedItem>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProcessBoxCreatedItem {
+    pub item_id: Option<i64>,
+    pub count: i32,
+    pub drop_key: Option<i64>,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProcessBoxInfo {
+    pub tn: Option<serde_json::Value>,
+    pub is_reset: bool,
+    pub created: Vec<ProcessBoxCreatedItem>,
+    pub at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FarmRow {
+    pub per_hour: Option<f64>,
+    pub expected: f64,
+    pub stage_id: i64,
+    pub name: String,
+    pub difficulty: String,
+    pub level: i32,
+    pub boxes: Vec<(i64, i32)>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StateEvent {
+    pub at: String,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CatalogStatus {
+    pub valid: bool,
+    pub items_count: usize,
+    pub stages_count: usize,
+    pub display_names_count: usize,
+}
+
+// ---- Invoke helpers ----
+
+pub async fn invoke_get_chest_rows(include_claimed: bool) -> Vec<ChestRow> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "includeClaimed": include_claimed
+    })).unwrap();
+    let result = invoke("get_chest_rows", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_get_box_summary() -> std::collections::HashMap<String, usize> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_box_summary", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_mark_opened(key: &str) {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "key": key
+    })).unwrap();
+    invoke("mark_opened", args).await;
+}
+
+pub async fn invoke_mark_all_opened() {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    invoke("mark_all_opened", args).await;
+}
+
+pub async fn invoke_get_last_added() -> Option<AddedItemsSnapshot> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_last_added", args).await;
+    serde_wasm_bindgen::from_value(result).ok()
+}
+
+pub async fn invoke_get_last_processbox() -> Option<ProcessBoxInfo> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_last_processbox", args).await;
+    serde_wasm_bindgen::from_value(result).ok()
+}
+
+pub async fn invoke_get_farm_ranking(
+    rarity: Option<String>,
+    kind: Option<String>,
+    item_id: Option<i64>,
+    min_level: Option<i32>,
+    max_level: Option<i32>,
+    clear_time: Option<f64>,
+) -> Vec<FarmRow> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "rarity": rarity,
+        "kind": kind,
+        "itemId": item_id,
+        "minLevel": min_level,
+        "maxLevel": max_level,
+        "clearTime": clear_time,
+    })).unwrap();
+    let result = invoke("get_farm_ranking", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_get_events() -> Vec<StateEvent> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_events", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_get_catalog_status() -> Option<CatalogStatus> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_catalog_status", args).await;
+    serde_wasm_bindgen::from_value(result).ok()
+}
+
+pub async fn invoke_reload_catalog() -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("reload_catalog", args).await;
+    result.as_bool().unwrap_or(false)
+}

@@ -11,7 +11,7 @@ pub fn state_path() -> PathBuf {
         .join("tbh_dashboard_state.json")
 }
 
-/// Resolve the assets root: $TBH_ASSETS or <exe_dir>/Assets
+/// Resolve the assets root: $TBH_ASSETS or <exe_dir>
 pub fn assets_root() -> PathBuf {
     if let Ok(val) = std::env::var("TBH_ASSETS") {
         return PathBuf::from(val);
@@ -20,7 +20,7 @@ pub fn assets_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
         .parent()
         .unwrap_or(&PathBuf::from("."))
-        .join("Assets")
+        .to_path_buf()
 }
 
 pub const REFRESH_SECONDS: f64 = 1.0;
