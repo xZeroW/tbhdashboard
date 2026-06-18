@@ -1,6 +1,6 @@
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::invoke;
 
 #[component]
 pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
@@ -55,7 +55,11 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     });
 
     let current_settings = move || invoke::AppSettings {
-        refresh_ms: refresh_ms.get().parse::<u32>().unwrap_or(500).clamp(100, 5000),
+        refresh_ms: refresh_ms
+            .get()
+            .parse::<u32>()
+            .unwrap_or(500)
+            .clamp(100, 5000),
         log_level: log_level.get(),
         proxy_url: proxy_url.get(),
         include_steam_launch_options: include_steam_launch_options.get(),

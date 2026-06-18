@@ -170,10 +170,7 @@ impl StaticCatalog {
     fn load_drops(&mut self) {
         let path = self.root.join("TextAsset").join("DropInfoData.txt");
         if !path.exists() {
-            eprintln!(
-                "[catalog] DropInfoData.txt not found at {}",
-                path.display()
-            );
+            eprintln!("[catalog] DropInfoData.txt not found at {}", path.display());
             return;
         }
         for row in read_csv(&path) {
@@ -210,10 +207,7 @@ impl StaticCatalog {
             for (i, v) in row.iter().enumerate() {
                 if box_re.is_match(v) {
                     if let Some(bid) = safe_int(v) {
-                        let count = row
-                            .get(i + 1)
-                            .and_then(|s| safe_int(s))
-                            .unwrap_or(0) as i32;
+                        let count = row.get(i + 1).and_then(|s| safe_int(s)).unwrap_or(0) as i32;
                         boxes.push((bid, count));
                     }
                 }
@@ -286,7 +280,11 @@ impl StaticCatalog {
     fn expand(&self, typ: &str, target: Option<i64>) -> Vec<i64> {
         match typ {
             "ITEM" => target.into_iter().collect(),
-            "ITEMGROUP" => self.groups.get(&target.unwrap_or(0)).cloned().unwrap_or_default(),
+            "ITEMGROUP" => self
+                .groups
+                .get(&target.unwrap_or(0))
+                .cloned()
+                .unwrap_or_default(),
             _ => vec![],
         }
     }
@@ -751,7 +749,12 @@ mod tests {
         let re = Regex::new(r"value:\s*(.+)").unwrap();
         let line = "  value: 'Flame Sword'";
         let caps = re.captures(line).unwrap();
-        let val = caps.get(1).unwrap().as_str().trim().trim_matches(|c| c == '\'' || c == '"');
+        let val = caps
+            .get(1)
+            .unwrap()
+            .as_str()
+            .trim()
+            .trim_matches(|c| c == '\'' || c == '"');
         assert_eq!(val, "Flame Sword");
     }
 

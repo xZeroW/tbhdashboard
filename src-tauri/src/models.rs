@@ -168,7 +168,7 @@ impl Default for AppSettings {
 }
 
 fn default_refresh_ms() -> u32 {
-    500
+    (crate::config::REFRESH_SECONDS * 1000.0) as u32
 }
 
 fn default_log_level() -> String {

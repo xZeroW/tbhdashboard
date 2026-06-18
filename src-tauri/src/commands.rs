@@ -90,7 +90,10 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     let current_default = default_steam_launch_options();
     let current = settings.steam_launch_options.trim();
 
-    if current.is_empty() || (cfg!(target_os = "windows") && current == linux_default) || (!cfg!(target_os = "windows") && current == windows_default) {
+    if current.is_empty()
+        || (cfg!(target_os = "windows") && current == linux_default)
+        || (!cfg!(target_os = "windows") && current == windows_default)
+    {
         settings.steam_launch_options = current_default;
     }
 
@@ -221,15 +224,13 @@ fn open_steam_app(args: &[String]) -> Result<(), String> {
         .spawn()
     {
         Ok(_) => Ok(()),
-        Err(steam_err) if args.is_empty() => {
-            Command::new("xdg-open")
-                .arg(format!("steam://run/{STEAM_APP_ID}"))
-                .spawn()
-                .map(|_| ())
-                .map_err(|xdg_err| {
-                    format!("Failed to ask Steam to launch: steam: {steam_err}; xdg-open: {xdg_err}")
-                })
-        }
+        Err(steam_err) if args.is_empty() => Command::new("xdg-open")
+            .arg(format!("steam://run/{STEAM_APP_ID}"))
+            .spawn()
+            .map(|_| ())
+            .map_err(|xdg_err| {
+                format!("Failed to ask Steam to launch: steam: {steam_err}; xdg-open: {xdg_err}")
+            }),
         Err(steam_err) => Err(format!("Failed to run Steam directly: {steam_err}")),
     }
 }
@@ -237,33 +238,23 @@ fn open_steam_app(args: &[String]) -> Result<(), String> {
 // ---- Chest Queue ----
 
 #[tauri::command]
-pub fn get_chest_rows(
-    state: State<'_, ManagedState>,
-    include_claimed: bool,
-) -> Vec<ChestRow> {
+pub fn get_chest_rows(state: State<'_, ManagedState>, include_claimed: bool) -> Vec<ChestRow> {
     let catalog = state.catalog.lock().unwrap();
     chests::get_rows(&catalog, include_claimed, state.repo())
 }
 
 #[tauri::command]
-pub fn get_box_summary(
-    state: State<'_, ManagedState>,
-) -> HashMap<String, usize> {
+pub fn get_box_summary(state: State<'_, ManagedState>) -> HashMap<String, usize> {
     chests::box_summary(state.repo())
 }
 
 #[tauri::command]
-pub fn mark_opened(
-    state: State<'_, ManagedState>,
-    key: String,
-) -> usize {
+pub fn mark_opened(state: State<'_, ManagedState>, key: String) -> usize {
     chests::mark_claimed_by_keys(&[key], "manual", state.repo())
 }
 
 #[tauri::command]
-pub fn mark_all_opened(
-    state: State<'_, ManagedState>,
-) -> usize {
+pub fn mark_all_opened(state: State<'_, ManagedState>) -> usize {
     let state_data = state.repo().load();
     let keys: Vec<String> = state_data
         .chests
@@ -277,18 +268,14 @@ pub fn mark_all_opened(
 // ---- Boss Drop / Added Items ----
 
 #[tauri::command]
-pub fn get_last_added(
-    state: State<'_, ManagedState>,
-) -> Option<AddedItemsSnapshot> {
+pub fn get_last_added(state: State<'_, ManagedState>) -> Option<AddedItemsSnapshot> {
     state.repo().load().last_added
 }
 
 // ---- Reroll Preview / ProcessBox ----
 
 #[tauri::command]
-pub fn get_last_processbox(
-    state: State<'_, ManagedState>,
-) -> Option<ProcessBoxInfo> {
+pub fn get_last_processbox(state: State<'_, ManagedState>) -> Option<ProcessBoxInfo> {
     state.repo().load().last_processbox
 }
 
@@ -342,9 +329,7 @@ pub fn get_farm_ranking(
 // ---- Events ----
 
 #[tauri::command]
-pub fn get_events(
-    state: State<'_, ManagedState>,
-) -> Vec<StateEvent> {
+pub fn get_events(state: State<'_, ManagedState>) -> Vec<StateEvent> {
     state.repo().load().events
 }
 
@@ -359,9 +344,7 @@ pub struct CatalogStatus {
 }
 
 #[tauri::command]
-pub fn get_catalog_status(
-    state: State<'_, ManagedState>,
-) -> CatalogStatus {
+pub fn get_catalog_status(state: State<'_, ManagedState>) -> CatalogStatus {
     let catalog = state.catalog.lock().unwrap();
     CatalogStatus {
         valid: catalog.valid,
@@ -371,12 +354,20 @@ pub fn get_catalog_status(
     }
 }
 
+#[tauri::command]
+pub fn get_rarity_order() -> Vec<String> {
+    config::RARITY_ORDER
+        .iter()
+        .copied()
+        .filter(|rarity| *rarity != "UNKNOWN")
+        .map(String::from)
+        .collect()
+}
+
 // ---- Reload catalog (after assets update) ----
 
 #[tauri::command]
-pub fn reload_catalog(
-    state: State<'_, ManagedState>,
-) -> bool {
+pub fn reload_catalog(state: State<'_, ManagedState>) -> bool {
     let mut catalog = state.catalog.lock().unwrap();
     let saved = state.repo().load();
     let root = saved.assets_path.as_deref().map(std::path::PathBuf::from);
@@ -387,31 +378,27 @@ pub fn reload_catalog(
 // ---- Assets path ----
 
 #[tauri::command]
-pub fn get_assets_path(
-    state: State<'_, ManagedState>,
-) -> Option<String> {
+pub fn get_assets_path(state: State<'_, ManagedState>) -> Option<String> {
     state.repo().load().assets_path
 }
 
 #[tauri::command]
-pub fn set_assets_path(
-    state: State<'_, ManagedState>,
-    path: String,
-) -> bool {
+pub fn set_assets_path(state: State<'_, ManagedState>, path: String) -> bool {
     let mut state_data = state.repo().load();
     state_data.assets_path = Some(path);
     let _ = state.repo().save(&state_data);
 
-    let root = state_data.assets_path.as_deref().map(std::path::PathBuf::from);
+    let root = state_data
+        .assets_path
+        .as_deref()
+        .map(std::path::PathBuf::from);
     let mut catalog = state.catalog.lock().unwrap();
     *catalog = StaticCatalog::new(root);
     catalog.valid
 }
 
 #[tauri::command]
-pub fn get_assets_root(
-    state: State<'_, ManagedState>,
-) -> String {
+pub fn get_assets_root(state: State<'_, ManagedState>) -> String {
     let saved = state.repo().load();
     match saved.assets_path {
         Some(ref p) => p.clone(),
@@ -431,5 +418,7 @@ pub async fn browse_assets_folder(window: tauri::Window) -> Option<String> {
             let _ = tx.send(path);
         });
     let path = rx.recv().ok().flatten()?;
-    path.into_path().ok().map(|p| p.to_string_lossy().into_owned())
+    path.into_path()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
 }

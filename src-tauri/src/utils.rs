@@ -16,28 +16,6 @@ pub fn parse_dt(s: &str) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
 }
 
-pub fn fmt_delta(seconds: f64) -> String {
-    let secs = seconds as i64;
-    if secs <= 0 {
-        return "CLAIMABLE".to_string();
-    }
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    let s = secs % 60;
-    if h > 0 {
-        format!("{}h {:02}m", h, m)
-    } else {
-        format!("{}m {:02}s", m, s)
-    }
-}
-
-pub fn fmt_clock(dt: &Option<DateTime<Utc>>) -> String {
-    match dt {
-        Some(d) => d.with_timezone(&chrono::Local).format("%H:%M:%S").to_string(),
-        None => "?".to_string(),
-    }
-}
-
 pub fn safe_int(s: &str) -> Option<i64> {
     s.parse::<i64>().ok()
 }
@@ -60,22 +38,26 @@ pub fn read_csv(path: &Path) -> Vec<Vec<String>> {
 pub fn parse_jsonish_list(value: &serde_json::Value) -> Vec<String> {
     match value {
         serde_json::Value::Null => vec![],
-        serde_json::Value::Array(arr) => {
-            arr.iter().filter_map(|v| match v {
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| match v {
                 serde_json::Value::String(s) => Some(s.clone()),
                 serde_json::Value::Number(n) => Some(n.to_string()),
                 _ => None,
-            }).collect()
-        }
+            })
+            .collect(),
         serde_json::Value::Number(n) => vec![n.to_string()],
         serde_json::Value::String(s) => {
             let s = s.trim();
-            if s.is_empty() { return vec![]; }
+            if s.is_empty() {
+                return vec![];
+            }
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
                 match parsed {
-                    serde_json::Value::Array(arr) => {
-                        arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-                    }
+                    serde_json::Value::Array(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect(),
                     other => vec![other.to_string()],
                 }
             } else {
@@ -90,24 +72,6 @@ pub fn parse_jsonish_list(value: &serde_json::Value) -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn fmt_delta_claimable() {
-        assert_eq!(fmt_delta(0.0), "CLAIMABLE");
-        assert_eq!(fmt_delta(-5.0), "CLAIMABLE");
-    }
-
-    #[test]
-    fn fmt_delta_minutes_and_seconds() {
-        assert_eq!(fmt_delta(90.0), "1m 30s");
-        assert_eq!(fmt_delta(65.0), "1m 05s");
-    }
-
-    #[test]
-    fn fmt_delta_hours_and_minutes() {
-        assert_eq!(fmt_delta(3661.0), "1h 01m");
-        assert_eq!(fmt_delta(7200.0), "2h 00m");
-    }
 
     #[test]
     fn safe_int_valid() {
@@ -130,7 +94,10 @@ mod tests {
 
     #[test]
     fn parse_jsonish_list_array() {
-        assert_eq!(parse_jsonish_list(&json!(["a", "b", "c"])), vec!["a", "b", "c"]);
+        assert_eq!(
+            parse_jsonish_list(&json!(["a", "b", "c"])),
+            vec!["a", "b", "c"]
+        );
     }
 
     #[test]

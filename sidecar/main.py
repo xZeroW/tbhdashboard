@@ -33,8 +33,8 @@ def main():
         print(f"[TBH] ERROR: addon.py not found at {addon_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Inject -s addon.py into argv so mitmproxy loads our addon
-    sys.argv = [sys.argv[0], "-s", str(addon_path)]
+    # Inject -s addon.py while preserving Tauri-provided mitmdump options.
+    sys.argv = [sys.argv[0], "-s", str(addon_path), *sys.argv[1:]]
 
     from mitmproxy.tools.main import mitmdump
 

@@ -1,7 +1,9 @@
+use crate::app::{
+    chest_emoji, rarity_class, rarity_color, rarity_diamond, rarity_title, reward_emoji,
+};
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::invoke;
-use crate::app::{rarity_color, rarity_title, rarity_diamond, chest_emoji, reward_emoji};
 
 #[component]
 pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
@@ -31,20 +33,23 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
         let tab = filter_tab.get();
         let only_claimable = show_claimable_only.get();
         let show_claimed = show_claimed.get();
-        rows.get().into_iter().filter(|r| {
-            if r.is_get && !show_claimed {
-                return false;
-            }
-            if only_claimable && r.remaining > 0.0 {
-                return false;
-            }
-            match tab.as_str() {
-                "Common" => r.box_label.contains("Common"),
-                "Stage" => r.box_label.contains("Stage"),
-                "Boss" => r.box_label.contains("Boss"),
-                _ => true,
-            }
-        }).collect::<Vec<_>>()
+        rows.get()
+            .into_iter()
+            .filter(|r| {
+                if r.is_get && !show_claimed {
+                    return false;
+                }
+                if only_claimable && r.remaining > 0.0 {
+                    return false;
+                }
+                match tab.as_str() {
+                    "Common" => r.box_label.contains("Common"),
+                    "Stage" => r.box_label.contains("Stage"),
+                    "Boss" => r.box_label.contains("Boss"),
+                    _ => true,
+                }
+            })
+            .collect::<Vec<_>>()
     };
 
     let _stats = move || {
@@ -122,6 +127,7 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                             ((86400.0 - row.remaining) / 86400.0 * 100.0).min(100.0)
                         };
                         let color = rarity_color(&row.rarity);
+                        let badge_class = format!("rarity-badge {}", rarity_class(&row.rarity));
                         let ce = chest_emoji(&row.box_label);
                         let re = reward_emoji(&row.rarity);
                         let key_for_open = row.key.clone().unwrap_or_default();
@@ -158,7 +164,7 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                                     </div>
                                 </td>
                                 <td>
-                                    <span class="rarity-badge" style:color=color>
+                                    <span class=badge_class style:color=color>
                                         <span class="diamond">{rarity_diamond(&row.rarity)}</span>
                                         {rarity_title(&row.rarity)}
                                     </span>

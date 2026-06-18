@@ -1,6 +1,6 @@
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::invoke;
 
 #[component]
 pub fn EventLog(tick: ReadSignal<u32>) -> impl IntoView {

@@ -69,11 +69,7 @@ pub fn normalize_chest(c: &DynamicMap, source: &str) -> Option<ChestRecord> {
     })
 }
 
-pub fn sync_chests(
-    chests: &[DynamicMap],
-    source: &str,
-    repo: &StateRepository,
-) -> (usize, usize) {
+pub fn sync_chests(chests: &[DynamicMap], source: &str, repo: &StateRepository) -> (usize, usize) {
     let mut state = repo.load();
     let old_count = state.chests.len();
     let mut new_db: HashMap<String, ChestRecord> = HashMap::new();
@@ -87,7 +83,10 @@ pub fn sync_chests(
     state.chests = new_db;
     repo.add_event(
         &mut state,
-        &format!("{}: synced snapshot {}, replaced {}", source, count, old_count),
+        &format!(
+            "{}: synced snapshot {}, replaced {}",
+            source, count, old_count
+        ),
     );
     repo.save(&state).unwrap();
     (count, old_count)
@@ -131,11 +130,7 @@ pub fn upsert_chests(
     (added, updated)
 }
 
-pub fn mark_claimed_by_keys(
-    keys: &[String],
-    source: &str,
-    repo: &StateRepository,
-) -> usize {
+pub fn mark_claimed_by_keys(keys: &[String], source: &str, repo: &StateRepository) -> usize {
     let mut state = repo.load();
     let mut changed = 0usize;
     let now = utc_now_iso();
@@ -425,10 +420,8 @@ mod tests {
         upsert_chests(&vec![m1], "test", &repo);
 
         let mut state = repo.load();
-        state.chests.get_mut("k1").unwrap().claimed_at =
-            Some("2025-01-15T10:00:00Z".to_string());
-        state.chests.get_mut("k1").unwrap().claim_source =
-            Some("old_source".to_string());
+        state.chests.get_mut("k1").unwrap().claimed_at = Some("2025-01-15T10:00:00Z".to_string());
+        state.chests.get_mut("k1").unwrap().claim_source = Some("old_source".to_string());
         repo.save(&state).unwrap();
 
         let m2 = make_chest_map("k1", Some(920651));
@@ -437,10 +430,7 @@ mod tests {
         let state = repo.load();
         let chest = &state.chests["k1"];
         assert!(chest.is_get);
-        assert_eq!(
-            chest.claimed_at,
-            Some("2025-01-15T10:00:00Z".to_string())
-        );
+        assert_eq!(chest.claimed_at, Some("2025-01-15T10:00:00Z".to_string()));
         assert_eq!(chest.claim_source, Some("old_source".to_string()));
         assert_eq!(chest.item_id, Some(920651));
     }

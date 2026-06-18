@@ -1,6 +1,6 @@
 mod app;
-mod invoke;
 mod components;
+mod invoke;
 
 use app::*;
 use leptos::prelude::*;

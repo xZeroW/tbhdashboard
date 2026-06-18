@@ -1,8 +1,8 @@
-use std::fs;
-use std::path::PathBuf;
-use anyhow::{Context, Result};
 use crate::models::{AppState, StateEvent};
 use crate::utils::utc_now_iso;
+use anyhow::{Context, Result};
+use std::fs;
+use std::path::PathBuf;
 
 pub struct StateRepository {
     pub path: PathBuf,
@@ -23,16 +23,12 @@ impl StateRepository {
 
     pub fn save(&self, state: &AppState) -> Result<()> {
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)
-                .context("failed to create state directory")?;
+            fs::create_dir_all(parent).context("failed to create state directory")?;
         }
         let tmp = self.path.with_extension("tmp");
-        let data = serde_json::to_string_pretty(state)
-            .context("failed to serialize state")?;
-        fs::write(&tmp, data)
-            .context("failed to write temp state file")?;
-        fs::rename(&tmp, &self.path)
-            .context("failed to rename temp state file")?;
+        let data = serde_json::to_string_pretty(state).context("failed to serialize state")?;
+        fs::write(&tmp, data).context("failed to write temp state file")?;
+        fs::rename(&tmp, &self.path).context("failed to rename temp state file")?;
         Ok(())
     }
 

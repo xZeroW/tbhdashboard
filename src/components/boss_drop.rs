@@ -1,7 +1,7 @@
+use crate::app::{rarity_color, rarity_diamond, rarity_title};
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::invoke;
-use crate::app::{rarity_color, rarity_title, rarity_diamond};
 
 #[component]
 pub fn BossDrop(tick: ReadSignal<u32>) -> impl IntoView {

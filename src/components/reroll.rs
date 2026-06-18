@@ -1,18 +1,23 @@
+use crate::app::{chest_emoji, rarity_color, rarity_diamond, rarity_title, reward_emoji};
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::invoke;
-use crate::app::{rarity_color, rarity_title, rarity_diamond, chest_emoji, reward_emoji};
-
-const RARITY_OPTIONS: &[&str] = &[
-    "COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "IMMORTAL",
-    "ARCANA", "BEYOND", "CELESTIAL", "DIVINE", "COSMIC",
-];
 
 #[component]
 pub fn RerollPreview(tick: ReadSignal<u32>) -> impl IntoView {
     let (rows, set_rows) = signal(Vec::<invoke::ChestRow>::new());
     let (reroll_info, set_reroll_info) = signal(None::<invoke::ProcessBoxInfo>);
     let (filter_rarity, set_filter_rarity) = signal("ALL".to_string());
+    let (rarity_options, set_rarity_options) = signal(Vec::<String>::new());
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let options = invoke::invoke_get_rarity_order().await;
+            if !options.is_empty() {
+                set_rarity_options.set(options);
+            }
+        });
+    });
 
     let fetch_data = move || {
         spawn_local(async move {
@@ -30,17 +35,28 @@ pub fn RerollPreview(tick: ReadSignal<u32>) -> impl IntoView {
 
     let filtered_rows = move || {
         let filt = filter_rarity.get();
-        let min_idx = RARITY_OPTIONS.iter().position(|&r| r == filt);
-        let mut display: Vec<invoke::ChestRow> = rows.get()
+        let options = rarity_options.get();
+        let min_idx = options.iter().position(|r| r == &filt);
+        let mut display: Vec<invoke::ChestRow> = rows
+            .get()
             .into_iter()
             .filter(|r| {
-                filt == "ALL" || match min_idx {
-                    Some(mi) => RARITY_OPTIONS.iter().position(|&x| x == r.rarity).map(|ri| ri >= mi).unwrap_or(false),
-                    None => false,
-                }
+                filt == "ALL"
+                    || match min_idx {
+                        Some(mi) => options
+                            .iter()
+                            .position(|x| x == &r.rarity)
+                            .map(|ri| ri >= mi)
+                            .unwrap_or(false),
+                        None => false,
+                    }
             })
             .collect();
-        display.sort_by(|a, b| a.remaining.partial_cmp(&b.remaining).unwrap_or(std::cmp::Ordering::Equal));
+        display.sort_by(|a, b| {
+            a.remaining
+                .partial_cmp(&b.remaining)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         display
     };
 
@@ -66,8 +82,9 @@ pub fn RerollPreview(tick: ReadSignal<u32>) -> impl IntoView {
                     set_filter_rarity.set(event_target_value(&ev));
                 }>
                     <option value="ALL" style="background: #131921; color: #ffffff;">"ALL"</option>
-                    {RARITY_OPTIONS.iter().map(|&r| {
-                        view! { <option value=r style="background: #131921; color: #ffffff;">{r}</option> }
+                    {move || rarity_options.get().into_iter().map(|r| {
+                        let value = r.clone();
+                        view! { <option value=value style="background: #131921; color: #ffffff;">{r}</option> }
                     }).collect::<Vec<_>>()}
                 </select>
             </label>

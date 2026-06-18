@@ -269,7 +269,7 @@ def _handle_response(flow: http.HTTPFlow):
     if "/backend-function/base/v1" in path:
         claimed_keys = mark_claimed_from_backend_request(flow)
         if claimed_keys:
-            emit("claimed", count=len(claimed_keys), keys=claimed_keys)
+            emit("claimed", count=len(claimed_keys), source=source, keys=claimed_keys)
 
     # 2. Detect processBox events
     pb_info = None

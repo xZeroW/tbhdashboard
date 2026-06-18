@@ -1,5 +1,5 @@
-use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
@@ -130,7 +130,8 @@ impl Default for AppSettings {
 pub async fn invoke_get_chest_rows(include_claimed: bool) -> Vec<ChestRow> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "includeClaimed": include_claimed
-    })).unwrap();
+    }))
+    .unwrap();
     let result = invoke("get_chest_rows", args).await;
     serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
@@ -144,13 +145,9 @@ pub async fn invoke_get_box_summary() -> std::collections::HashMap<String, usize
 pub async fn invoke_mark_opened(key: &str) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "key": key
-    })).unwrap();
+    }))
+    .unwrap();
     invoke("mark_opened", args).await;
-}
-
-pub async fn invoke_mark_all_opened() {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    invoke("mark_all_opened", args).await;
 }
 
 pub async fn invoke_get_last_added() -> Option<AddedItemsSnapshot> {
@@ -180,7 +177,8 @@ pub async fn invoke_get_farm_ranking(
         "minLevel": min_level,
         "maxLevel": max_level,
         "clearTime": clear_time,
-    })).unwrap();
+    }))
+    .unwrap();
     let result = invoke("get_farm_ranking", args).await;
     serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
@@ -195,6 +193,12 @@ pub async fn invoke_get_catalog_status() -> Option<CatalogStatus> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("get_catalog_status", args).await;
     serde_wasm_bindgen::from_value(result).ok()
+}
+
+pub async fn invoke_get_rarity_order() -> Vec<String> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_rarity_order", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
 
 pub async fn invoke_get_proxy_status() -> Option<ProxyStatus> {
@@ -212,7 +216,8 @@ pub async fn invoke_get_settings() -> AppSettings {
 pub async fn invoke_set_settings(settings: AppSettings) -> bool {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "settings": settings
-    })).unwrap();
+    }))
+    .unwrap();
     let result = invoke("set_settings", args).await;
     result.as_bool().unwrap_or(false)
 }
@@ -232,16 +237,11 @@ pub async fn invoke_reload_catalog() -> bool {
     result.as_bool().unwrap_or(false)
 }
 
-pub async fn invoke_get_assets_path() -> Option<String> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("get_assets_path", args).await;
-    result.as_string()
-}
-
 pub async fn invoke_set_assets_path(path: &str) -> bool {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "path": path
-    })).unwrap();
+    }))
+    .unwrap();
     let result = invoke("set_assets_path", args).await;
     result.as_bool().unwrap_or(false)
 }

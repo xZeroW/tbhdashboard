@@ -14,7 +14,6 @@
           "name": "binaries/tbhd-sidecar",
           "sidecar": true,
           "args": [
-            "-s", "main.py",
             "--set", "upstream_cert=false",
             "-p", { "validator": "\\d+" }
           ]

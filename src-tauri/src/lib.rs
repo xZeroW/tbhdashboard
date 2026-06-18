@@ -1,5 +1,5 @@
-mod catalog;
 mod capture;
+mod catalog;
 mod chests;
 mod commands;
 mod config;
@@ -50,6 +50,7 @@ pub fn run() {
             commands::get_farm_ranking,
             commands::get_events,
             commands::get_catalog_status,
+            commands::get_rarity_order,
             commands::reload_catalog,
             commands::get_assets_path,
             commands::set_assets_path,

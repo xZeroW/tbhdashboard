@@ -1,11 +1,6 @@
+use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use crate::invoke;
-
-const RARITY_OPTIONS: &[&str] = &[
-    "COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "IMMORTAL",
-    "ARCANA", "BEYOND", "CELESTIAL", "DIVINE", "COSMIC",
-];
 
 #[component]
 pub fn FarmRanking(tick: ReadSignal<u32>) -> impl IntoView {
@@ -14,6 +9,16 @@ pub fn FarmRanking(tick: ReadSignal<u32>) -> impl IntoView {
     let (min_level, set_min_level) = signal("0".to_string());
     let (max_level, set_max_level) = signal("0".to_string());
     let (clear_time, set_clear_time) = signal("0".to_string());
+    let (rarity_options, set_rarity_options) = signal(Vec::<String>::new());
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let options = invoke::invoke_get_rarity_order().await;
+            if !options.is_empty() {
+                set_rarity_options.set(options);
+            }
+        });
+    });
 
     let fetch_data = move || {
         let rarity = selected_rarity.get();
@@ -21,9 +26,8 @@ pub fn FarmRanking(tick: ReadSignal<u32>) -> impl IntoView {
         let max_l = max_level.get().parse::<i32>().ok().filter(|&v| v > 0);
         let ct = clear_time.get().parse::<f64>().ok().filter(|&v| v > 0.0);
         spawn_local(async move {
-            let data = invoke::invoke_get_farm_ranking(
-                Some(rarity), None, None, min_l, max_l, ct
-            ).await;
+            let data =
+                invoke::invoke_get_farm_ranking(Some(rarity), None, None, min_l, max_l, ct).await;
             set_rows.set(data);
         });
     };
@@ -44,8 +48,10 @@ pub fn FarmRanking(tick: ReadSignal<u32>) -> impl IntoView {
                     set_selected_rarity.set(event_target_value(&ev));
                     fetch_data();
                 }>
-                    {RARITY_OPTIONS.iter().map(|&r| {
-                        view! { <option value=r selected={r == "BEYOND"}>{r}</option> }
+                    {move || rarity_options.get().into_iter().map(|r| {
+                        let selected = r == "BEYOND";
+                        let value = r.clone();
+                        view! { <option value=value selected=selected>{r}</option> }
                     }).collect::<Vec<_>>()}
                 </select>
             </label>

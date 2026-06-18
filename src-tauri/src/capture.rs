@@ -1,7 +1,7 @@
 use crate::chests;
 use crate::models::*;
 use crate::state::StateRepository;
-use crate::utils::utc_now_iso;
+use crate::utils::{parse_jsonish_list, utc_now_iso};
 
 /// A parsed event from the sidecar.
 pub enum SidecarEvent {
@@ -28,6 +28,8 @@ pub enum SidecarEvent {
     },
     Claimed {
         count: usize,
+        source: String,
+        keys: Vec<String>,
     },
     Unknown,
 }
@@ -54,20 +56,16 @@ pub fn parse_sidecar_line(line: &str) -> SidecarEvent {
                 .and_then(|c| c.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|item| item.as_object().map(|m| m.clone().into_iter().collect()))
+                        .filter_map(|item| {
+                            item.as_object().map(|m| m.clone().into_iter().collect())
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
         },
         "chests_upserted" => SidecarEvent::ChestsUpserted {
-            added: v
-                .get("added")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(0) as usize,
-            updated: v
-                .get("updated")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(0) as usize,
+            added: v.get("added").and_then(|c| c.as_u64()).unwrap_or(0) as usize,
+            updated: v.get("updated").and_then(|c| c.as_u64()).unwrap_or(0) as usize,
             source: v
                 .get("source")
                 .and_then(|s| s.as_str())
@@ -78,16 +76,15 @@ pub fn parse_sidecar_line(line: &str) -> SidecarEvent {
                 .and_then(|c| c.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|item| item.as_object().map(|m| m.clone().into_iter().collect()))
+                        .filter_map(|item| {
+                            item.as_object().map(|m| m.clone().into_iter().collect())
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
         },
         "added_items" => SidecarEvent::AddedItems {
-            count: v
-                .get("count")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(0) as usize,
+            count: v.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as usize,
             source: v
                 .get("source")
                 .and_then(|s| s.as_str())
@@ -115,10 +112,13 @@ pub fn parse_sidecar_line(line: &str) -> SidecarEvent {
                 .to_string(),
         },
         "claimed" => SidecarEvent::Claimed {
-            count: v
-                .get("count")
-                .and_then(|c| c.as_u64())
-                .unwrap_or(0) as usize,
+            count: v.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as usize,
+            source: v
+                .get("source")
+                .and_then(|s| s.as_str())
+                .unwrap_or("sidecar")
+                .to_string(),
+            keys: v.get("keys").map(parse_jsonish_list).unwrap_or_default(),
         },
         _ => SidecarEvent::Unknown,
     }
@@ -134,7 +134,10 @@ pub fn apply_sidecar_event(event: SidecarEvent, repo: &StateRepository) {
             chests,
         } => {
             chests::sync_chests(&chests, &source, repo);
-            println!("[TBH-Rust] synced {}, replaced {} -> {:?}", count, old, repo.path);
+            println!(
+                "[TBH-Rust] synced {}, replaced {} -> {:?}",
+                count, old, repo.path
+            );
         }
         SidecarEvent::ChestsUpserted {
             added,
@@ -148,14 +151,21 @@ pub fn apply_sidecar_event(event: SidecarEvent, repo: &StateRepository) {
                 added, updated, repo.path
             );
         }
-        SidecarEvent::AddedItems { source, items, .. } => {
+        SidecarEvent::AddedItems {
+            count,
+            source,
+            items,
+        } => {
             let mut state = repo.load();
             state.last_added = Some(AddedItemsSnapshot {
                 at: utc_now_iso(),
                 source: source.clone(),
                 items,
             });
-            repo.add_event(&mut state, &format!("{}: immediate added items", source));
+            repo.add_event(
+                &mut state,
+                &format!("{}: immediate added items ({})", source, count),
+            );
             repo.save(&state).unwrap();
         }
         SidecarEvent::ProcessBox { info, description } => {
@@ -164,11 +174,20 @@ pub fn apply_sidecar_event(event: SidecarEvent, repo: &StateRepository) {
             repo.add_event(&mut state, &description);
             repo.save(&state).unwrap();
         }
-        SidecarEvent::Claimed { count } => {
-            if count > 0 {
-                let mut state = repo.load();
-                repo.add_event(&mut state, &format!("claimed {} opened", count));
-                repo.save(&state).unwrap();
+        SidecarEvent::Claimed {
+            count,
+            source,
+            keys,
+        } => {
+            if keys.is_empty() {
+                if count > 0 {
+                    let mut state = repo.load();
+                    repo.add_event(&mut state, &format!("{}: claimed {} opened", source, count));
+                    repo.save(&state).unwrap();
+                }
+            } else {
+                let changed = chests::mark_claimed_by_keys(&keys, &source, repo);
+                println!("[TBH-Rust] marked {} claimed from sidecar", changed);
             }
         }
         SidecarEvent::Unknown => {}

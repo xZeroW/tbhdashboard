@@ -1,10 +1,10 @@
+use crate::capture;
+use crate::commands::ProxyStatus;
+use crate::state::StateRepository;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
-use crate::capture;
-use crate::commands::ProxyStatus;
-use crate::state::StateRepository;
 
 pub struct SidecarManager {
     child: Option<CommandChild>,
@@ -13,7 +13,10 @@ pub struct SidecarManager {
 
 impl SidecarManager {
     pub fn new(status: Arc<Mutex<ProxyStatus>>) -> Self {
-        Self { child: None, status }
+        Self {
+            child: None,
+            status,
+        }
     }
 
     fn set_status(&self, running: bool, state: &str, message: impl Into<String>) {
@@ -28,7 +31,11 @@ impl SidecarManager {
         self.set_status(false, "starting", "Starting");
         let _ = app.emit("proxy-status-changed", ());
 
-        let sidecar_command = match app.shell().sidecar("tbhd-sidecar") {
+        let sidecar_command = match app
+            .shell()
+            .sidecar("tbhd-sidecar")
+            .map(|cmd| cmd.args(["--set", "upstream_cert=false", "-p", "8080"]))
+        {
             Ok(cmd) => cmd,
             Err(e) => {
                 eprintln!("[TBH] Failed to create sidecar command: {}", e);
@@ -57,9 +64,7 @@ impl SidecarManager {
         let status_handle = self.status.clone();
         let last_error = Arc::new(Mutex::new(None::<String>));
         let last_error_handle = last_error.clone();
-        let repo = Arc::new(Mutex::new(
-            StateRepository::new(repo.path.clone())
-        ));
+        let repo = Arc::new(Mutex::new(StateRepository::new(repo.path.clone())));
 
         // Read stdout/stderr from sidecar in background
         tauri::async_runtime::spawn(async move {
@@ -70,7 +75,9 @@ impl SidecarManager {
                         let line = String::from_utf8_lossy(&line_bytes);
                         for line in line.lines() {
                             let line = line.trim();
-                            if line.is_empty() { continue; }
+                            if line.is_empty() {
+                                continue;
+                            }
                             println!("[TBH-sidecar] {}", line);
 
                             if let Some(message) = proxy_error_message(line) {
@@ -96,7 +103,9 @@ impl SidecarManager {
                         let line = String::from_utf8_lossy(&line_bytes);
                         for line in line.lines() {
                             let line = line.trim();
-                            if line.is_empty() { continue; }
+                            if line.is_empty() {
+                                continue;
+                            }
                             eprintln!("[TBH-sidecar] {}", line);
 
                             if let Some(message) = proxy_error_message(line) {
@@ -121,7 +130,10 @@ impl SidecarManager {
                     }
                     CommandEvent::Terminated(status) => {
                         println!("[TBH-sidecar] Terminated with status: {:?}", status);
-                        let message = last_error.lock().unwrap().clone()
+                        let message = last_error
+                            .lock()
+                            .unwrap()
+                            .clone()
                             .unwrap_or_else(|| format!("Stopped: {:?}", status));
                         *status_handle.lock().unwrap() = ProxyStatus {
                             running: false,
@@ -170,7 +182,11 @@ fn extract_listen_port(line: &str) -> Option<String> {
         .take_while(|ch| ch.is_ascii_digit())
         .collect();
 
-    if port.is_empty() { None } else { Some(port) }
+    if port.is_empty() {
+        None
+    } else {
+        Some(port)
+    }
 }
 
 impl Drop for SidecarManager {
