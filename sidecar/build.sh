@@ -20,6 +20,7 @@ echo "Building sidecar binary with Nuitka..."
 python -m nuitka \
     --mode=onefile \
     --assume-yes-for-downloads \
+    --output-dir=dist \
     --output-filename=tbhd-sidecar \
     --include-package=mitmproxy \
     --include-package=mitmproxy.tools \
