@@ -318,10 +318,10 @@ impl StaticCatalog {
                     ok = iid == iid_filter;
                 } else {
                     if let Some(r) = rarity {
-                        ok = ok && inf.map_or(false, |i| i.rarity == r);
+                        ok = ok && inf.is_some_and(|i| i.rarity == r);
                     }
                     if let Some(k) = kind {
-                        ok = ok && inf.map_or(false, |i| i.kind == k);
+                        ok = ok && inf.is_some_and(|i| i.kind == k);
                     }
                 }
                 if ok {
@@ -361,6 +361,7 @@ impl StaticCatalog {
             .sum()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn rank_stages(
         &self,
         rarity: Option<&str>,

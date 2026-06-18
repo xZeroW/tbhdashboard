@@ -3,9 +3,13 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   release:
@@ -15,8 +19,6 @@ jobs:
         include:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-          - platform: ubuntu-22.04
-            target: aarch64-unknown-linux-gnu
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
 
@@ -30,15 +32,20 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Install Trunk
         uses: dtolnay/install-trunk@main
@@ -49,30 +56,45 @@ jobs:
           python-version: '3.12'
 
       - name: Build Python sidecar
+        shell: bash
         run: |
-          pip install nuitka mitmproxy
-          cd sidecar
+          python -m pip install --upgrade pip
+          python -m pip install -r sidecar/requirements.txt nuitka
+          pushd sidecar
           python -m nuitka \
             --mode=onefile \
             --output-filename=tbhd-sidecar \
             --include-package=mitmproxy \
+            --include-package=mitmproxy.tools \
+            --include-data-files=addon.py=addon.py \
+            --nofollow-import-to=tkinter,matplotlib,numpy,pandas \
             --follow-imports \
             main.py
-          mkdir -p ../src-tauri/binaries
-          cp dist/tbhd-sidecar "../src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
-          chmod +x "../src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
+          popd
+
+          mkdir -p src-tauri/binaries
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp sidecar/dist/tbhd-sidecar.exe "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}.exe"
+          else
+            cp sidecar/dist/tbhd-sidecar "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
+            chmod +x "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
+          fi
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tauriScript: npx tauri
+          tauriScript: cargo tauri
           args: --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
+          if-no-files-found: error
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/**/*
+            target/${{ matrix.target }}/release/bundle/**/*

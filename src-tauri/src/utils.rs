@@ -27,10 +27,8 @@ pub fn read_csv(path: &Path) -> Vec<Vec<String>> {
         .flexible(true)
         .from_reader(data.as_bytes());
     let mut rows = Vec::new();
-    for result in rdr.records() {
-        if let Ok(record) = result {
-            rows.push(record.iter().map(|s| s.to_string()).collect());
-        }
+    for record in rdr.records().flatten() {
+        rows.push(record.iter().map(|s| s.to_string()).collect());
     }
     rows
 }

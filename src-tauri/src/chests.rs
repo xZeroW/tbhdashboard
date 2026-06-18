@@ -417,7 +417,7 @@ mod tests {
 
         let mut m1 = make_chest_map("k1", Some(910651));
         m1.insert("isGet".to_string(), json!(true));
-        upsert_chests(&vec![m1], "test", &repo);
+        upsert_chests(&[m1], "test", &repo);
 
         let mut state = repo.load();
         state.chests.get_mut("k1").unwrap().claimed_at = Some("2025-01-15T10:00:00Z".to_string());
@@ -425,7 +425,7 @@ mod tests {
         repo.save(&state).unwrap();
 
         let m2 = make_chest_map("k1", Some(920651));
-        upsert_chests(&vec![m2], "test", &repo);
+        upsert_chests(&[m2], "test", &repo);
 
         let state = repo.load();
         let chest = &state.chests["k1"];
@@ -457,7 +457,7 @@ mod tests {
         let (repo, _dir) = temp_repo();
         let mut m = make_chest_map("k1", Some(910651));
         m.insert("isGet".to_string(), json!(true));
-        sync_chests(&vec![m], "test", &repo);
+        sync_chests(&[m], "test", &repo);
 
         let keys = vec!["k1".to_string()];
         let changed = mark_claimed_by_keys(&keys, "manual", &repo);
@@ -492,7 +492,7 @@ mod tests {
         let mut m1 = make_chest_map("k1", Some(910651));
         m1.insert("isGet".to_string(), json!(true));
         let m2 = make_chest_map("k2", Some(920651));
-        sync_chests(&vec![m1, m2], "test", &repo);
+        sync_chests(&[m1, m2], "test", &repo);
 
         let cat = StaticCatalog::new(None);
         let rows = get_rows(&cat, false, &repo);
@@ -506,7 +506,7 @@ mod tests {
         let mut m1 = make_chest_map("k1", Some(910651));
         m1.insert("isGet".to_string(), json!(true));
         let m2 = make_chest_map("k2", Some(920651));
-        sync_chests(&vec![m1, m2], "test", &repo);
+        sync_chests(&[m1, m2], "test", &repo);
 
         let cat = StaticCatalog::new(None);
         let rows = get_rows(&cat, true, &repo);
@@ -518,7 +518,7 @@ mod tests {
         let (repo, _dir) = temp_repo();
         let m1 = make_chest_map("k1", Some(910651));
         let m2 = make_chest_map("k2", Some(920651));
-        sync_chests(&vec![m1, m2], "test", &repo);
+        sync_chests(&[m1, m2], "test", &repo);
 
         let cat = StaticCatalog::new(None);
         let rows = get_rows(&cat, false, &repo);
@@ -537,7 +537,7 @@ mod tests {
         m2.insert("rarity".to_string(), json!("RARE"));
         let mut m3 = make_chest_map("k3", Some(910651));
         m3.insert("rarity".to_string(), json!("COMMON"));
-        sync_chests(&vec![m1, m2, m3], "test", &repo);
+        sync_chests(&[m1, m2, m3], "test", &repo);
 
         let summary = box_summary(&repo);
         assert_eq!(summary["COMMON"], 2);
@@ -552,7 +552,7 @@ mod tests {
         m1.insert("isGet".to_string(), json!(true));
         let mut m2 = make_chest_map("k2", Some(920651));
         m2.insert("rarity".to_string(), json!("RARE"));
-        sync_chests(&vec![m1, m2], "test", &repo);
+        sync_chests(&[m1, m2], "test", &repo);
 
         let summary = box_summary(&repo);
         assert_eq!(summary.get("COMMON"), None);
