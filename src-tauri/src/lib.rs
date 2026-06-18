@@ -1,3 +1,4 @@
+mod catalog;
 mod config;
 mod models;
 mod state;
