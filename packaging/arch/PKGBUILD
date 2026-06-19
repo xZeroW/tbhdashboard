@@ -51,7 +51,38 @@ build() {
   export CFLAGS="${CFLAGS/-flto=auto/}"
   export CXXFLAGS="${CXXFLAGS/-flto=auto/}"
 
-  scripts/build-sidecar.sh
+  # sidecar binary is pre-built in src-tauri/binaries/; the repo does not
+  # ship a build-sidecar script.  The PKGBUILD expects it to exist already.
+
+  # Build WASM frontend with explicit --release; under makepkg trunk build
+  # without --release unexpectedly defaults to dev profile.
+  #
+  # wasm-opt (binaryen v123) needs --enable-bulk-memory &
+  # --enable-sign-ext for newer Rust WASM output.  Trunk doesn't expose
+  # wasm-opt feature flags, so we run trunk twice: the first run downloads
+  # wasm-opt and compiles everything (but fails at wasm-opt validation),
+  # then we wrap wasm-opt and re-run trunk to finish successfully.
+  rm -rf ~/.cache/trunk
+  trunk build --release 2>/dev/null || true
+
+  local wasm_opt_bin
+  wasm_opt_bin="$(find ~/.cache/trunk -name wasm-opt -type f 2>/dev/null | head -1)"
+  if [ -n "$wasm_opt_bin" ] && [ ! -f "${wasm_opt_bin}.real" ]; then
+    mv "$wasm_opt_bin" "${wasm_opt_bin}.real"
+    cat > "$wasm_opt_bin" << 'WRAPPER'
+#!/bin/bash
+exec "$(dirname "$0")/wasm-opt.real" \
+  --enable-bulk-memory --enable-bulk-memory-opt --enable-sign-ext "$@"
+WRAPPER
+    chmod +x "$wasm_opt_bin"
+  fi
+
+  rm -rf dist
+  trunk build --release
+
+  # Prevent cargo tauri build from re-running trunk build (which lacks --release)
+  sed -i 's/"beforeBuildCommand": "trunk build"/"beforeBuildCommand": ""/' src-tauri/tauri.conf.json
+
   cargo tauri build --no-bundle --ci
 }
 

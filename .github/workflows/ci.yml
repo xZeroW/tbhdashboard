@@ -14,7 +14,7 @@ env:
 
 jobs:
   checks:
-    name: Rust, frontend, and sidecar checks
+    name: Rust, frontend, and proxy checks
     runs-on: ubuntu-22.04
 
     steps:

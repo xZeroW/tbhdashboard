@@ -1,25 +1,30 @@
-use anyhow::{Context, Result, anyhow};
+use crate::capture;
+use crate::commands::ProxyStatus;
+use crate::state::StateRepository;
 use http_body_util::BodyExt;
 use hudsucker::{
-    Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
-    certificate_authority::RcgenAuthority,
-    decode_response,
-    hyper::{Request, Response, StatusCode, header::HOST},
+    certificate_authority::RcgenAuthority, decode_response,
+    hyper::{header::HOST, Request, Response, StatusCode},
     rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
         KeyUsagePurpose,
     },
     rustls::crypto::aws_lc_rs,
+    Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     fs,
-    io::{self, Write},
     net::SocketAddr,
     path::PathBuf,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
+use tauri::{AppHandle, Emitter};
+use tokio::sync::mpsc;
 
 const DEFAULT_PORT: u16 = 8080;
 const TARGET_HOST: &str = "thebackend.io";
@@ -29,10 +34,160 @@ static INTERCEPT_LOGS: AtomicUsize = AtomicUsize::new(0);
 static TARGET_REQUEST_LOGS: AtomicUsize = AtomicUsize::new(0);
 static PROXY_REQUEST_LOGS: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone, Debug, Default)]
+pub struct ProxyManager {
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    proxy_handle: Option<tauri::async_runtime::JoinHandle<()>>,
+    status: Arc<Mutex<ProxyStatus>>,
+}
+
+impl ProxyManager {
+    pub fn new(status: Arc<Mutex<ProxyStatus>>) -> Self {
+        Self {
+            shutdown_tx: None,
+            proxy_handle: None,
+            status,
+        }
+    }
+
+    fn set_status(&self, running: bool, state: &str, message: impl Into<String>) {
+        *self.status.lock().unwrap() = ProxyStatus {
+            running,
+            state: state.to_string(),
+            message: message.into(),
+        };
+    }
+
+    pub fn start(&mut self, app: &AppHandle, repo: &StateRepository) {
+        self.set_status(false, "starting", "Starting");
+        let _ = app.emit("proxy-status-changed", ());
+
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Value>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        let addr = SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT));
+        let app_handle = app.clone();
+        let status_handle = self.status.clone();
+        let repo_clone = Arc::new(Mutex::new(StateRepository::new(repo.path.clone())));
+
+        let proxy_handle = tauri::async_runtime::spawn(async move {
+            match run_proxy(addr, event_tx, shutdown_rx).await {
+                Ok(()) => {
+                    println!("[TBH] Proxy shutdown complete");
+                    *status_handle.lock().unwrap() = ProxyStatus {
+                        running: false,
+                        state: "stopped".to_string(),
+                        message: "Stopped".to_string(),
+                    };
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    eprintln!("[TBH] Proxy error: {msg}");
+                    let user_msg = if msg.contains("address already in use")
+                        || msg.contains("Address already in use")
+                    {
+                        format!("Proxy port {DEFAULT_PORT} is already in use. Close the other app using it and restart the dashboard.")
+                    } else {
+                        format!("Proxy error: {msg}")
+                    };
+                    *status_handle.lock().unwrap() = ProxyStatus {
+                        running: false,
+                        state: "error".to_string(),
+                        message: user_msg,
+                    };
+                }
+            }
+            let _ = app_handle.emit("proxy-status-changed", ());
+        });
+
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            while let Some(value) = event_rx.recv().await {
+                let line = serde_json::to_string(&value).unwrap_or_default();
+                let parsed = capture::parse_sidecar_line(&line);
+                let repo_guard = repo_clone.lock().unwrap();
+                capture::apply_sidecar_event(parsed, &repo_guard);
+                let _ = app_handle.emit("state-changed", ());
+            }
+        });
+
+        self.proxy_handle = Some(proxy_handle);
+        self.set_status(true, "running", "Running");
+        let _ = app.emit("proxy-status-changed", ());
+        println!("[TBH] Proxy started on {addr}");
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.proxy_handle.take() {
+            handle.abort();
+        }
+        self.set_status(false, "stopped", "Stopped");
+        println!("[TBH] Proxy stopped");
+    }
+}
+
+impl Drop for ProxyManager {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+async fn run_proxy(
+    addr: SocketAddr,
+    event_tx: mpsc::UnboundedSender<Value>,
+    shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+) -> anyhow::Result<()> {
+    let (cert_pem, key_pem, ca_cert_path) = load_or_create_ca(None, None)?;
+
+    let key_pair = KeyPair::from_pem(&key_pem)
+        .map_err(|e| anyhow::anyhow!("failed to parse sidecar CA private key: {e}"))?;
+    let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair)
+        .map_err(|e| anyhow::anyhow!("failed to parse sidecar CA certificate: {e}"))?;
+    let provider = aws_lc_rs::default_provider();
+    let ca = RcgenAuthority::new(issuer, 1_000, provider.clone());
+
+    eprintln!("[TBH-sidecar] Hudsucker proxy loaded, waiting for traffic on {addr}");
+    eprintln!("[TBH-sidecar] CA certificate: {}", ca_cert_path.display());
+
+    let proxy = Proxy::builder()
+        .with_addr(addr)
+        .with_ca(ca)
+        .with_rustls_connector(provider)
+        .with_http_handler(TbhHandler::new(event_tx))
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .build()
+        .map_err(|e| anyhow::anyhow!("failed to create Hudsucker proxy: {e}"))?;
+
+    proxy
+        .start()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to start Hudsucker proxy: {e}"))
+}
+
+#[derive(Clone, Debug)]
 struct TbhHandler {
     source: Option<String>,
     path: Option<String>,
+    event_tx: mpsc::UnboundedSender<Value>,
+}
+
+impl TbhHandler {
+    fn new(event_tx: mpsc::UnboundedSender<Value>) -> Self {
+        Self {
+            source: None,
+            path: None,
+            event_tx,
+        }
+    }
+
+    fn emit(&self, event: Value) {
+        let _ = self.event_tx.send(event);
+    }
 }
 
 impl HttpHandler for TbhHandler {
@@ -82,7 +237,7 @@ impl HttpHandler for TbhHandler {
         {
             let claimed_keys = mark_claimed_from_backend_request(&req_json);
             if !claimed_keys.is_empty() {
-                emit(json!({
+                self.emit(json!({
                     "type": "claimed",
                     "count": claimed_keys.len(),
                     "source": info.source,
@@ -93,7 +248,7 @@ impl HttpHandler for TbhHandler {
             if let Some(pb_info) = get_processbox_info(&req_json)
                 && let Some(description) = describe_processbox_request(&pb_info)
             {
-                emit(json!({
+                self.emit(json!({
                     "type": "process_box",
                     "info": pb_info,
                     "description": description,
@@ -133,7 +288,7 @@ impl HttpHandler for TbhHandler {
         if let Ok(obj) = serde_json::from_slice::<Value>(&body_bytes) {
             let added_items = extract_added_from_any_json(&obj);
             if !added_items.is_empty() {
-                emit(json!({
+                self.emit(json!({
                     "type": "added_items",
                     "count": added_items.len(),
                     "source": source,
@@ -144,7 +299,7 @@ impl HttpHandler for TbhHandler {
             let chests = extract_chests_from_any_json(&obj);
             if !chests.is_empty() {
                 if chests.len() >= 40 || path.contains("UserInventory") {
-                    emit(json!({
+                    self.emit(json!({
                         "type": "chests_synced",
                         "count": chests.len(),
                         "old": 0,
@@ -152,7 +307,7 @@ impl HttpHandler for TbhHandler {
                         "chests": chests,
                     }));
                 } else {
-                    emit(json!({
+                    self.emit(json!({
                         "type": "chests_upserted",
                         "added": chests.len(),
                         "updated": 0,
@@ -192,7 +347,6 @@ fn log_limited(counter: &AtomicUsize, args: std::fmt::Arguments<'_>) {
     }
 }
 
-#[derive(Debug)]
 struct RequestInfo {
     host: String,
     path: String,
@@ -214,7 +368,6 @@ impl RequestInfo {
             .unwrap_or_else(|| "/".to_string());
         let path_no_query = path.split('?').next().unwrap_or("/").to_string();
         let source = format!("{} {}{}", req.method(), host, path_no_query);
-
         Some(Self {
             host,
             path: path_no_query,
@@ -238,21 +391,19 @@ fn is_interesting(host: &str, path: &str) -> bool {
             || path.contains("SteamItemInfo"))
 }
 
-fn emit(event: Value) {
-    let mut stdout = io::stdout().lock();
-    if let Err(err) = serde_json::to_writer(&mut stdout, &event)
-        .and_then(|_| writeln!(stdout).map_err(serde_json::Error::io))
-        .and_then(|_| stdout.flush().map_err(serde_json::Error::io))
-    {
-        eprintln!("[TBH-sidecar] failed to emit event: {err}");
-    }
-}
-
 fn safe_int(value: Option<&Value>) -> Option<i64> {
     match value {
         Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_u64().map(|n| n as i64)),
         Some(Value::String(s)) => s.parse::<i64>().ok(),
         _ => None,
+    }
+}
+
+fn json_value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
     }
 }
 
@@ -275,14 +426,6 @@ fn parse_jsonish_list(value: Option<&Value>) -> Vec<String> {
             }
         }
         Some(other) => vec![json_value_to_string(other)],
-    }
-}
-
-fn json_value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        other => other.to_string(),
     }
 }
 
@@ -550,121 +693,36 @@ fn now_iso() -> String {
     format!("{}.{:09}Z", now.as_secs(), now.subsec_nanos())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_writer(io::stderr)
-        .init();
-
-    let args = Args::parse(std::env::args().skip(1));
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
-    let (cert_pem, key_pem, ca_cert_path) = load_or_create_ca(args.ca_cert, args.ca_key)?;
-
-    let key_pair = KeyPair::from_pem(&key_pem).context("failed to parse sidecar CA private key")?;
-    let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair)
-        .context("failed to parse sidecar CA certificate")?;
-    let provider = aws_lc_rs::default_provider();
-    let ca = RcgenAuthority::new(issuer, 1_000, provider.clone());
-
-    eprintln!("[TBH-sidecar] Hudsucker addon loaded, waiting for traffic on {addr}");
-    eprintln!("[TBH-sidecar] CA certificate: {}", ca_cert_path.display());
-
-    let proxy = Proxy::builder()
-        .with_addr(addr)
-        .with_ca(ca)
-        .with_rustls_connector(provider)
-        .with_http_handler(TbhHandler::default())
-        .with_graceful_shutdown(shutdown_signal())
-        .build()
-        .context("failed to create Hudsucker proxy")?;
-
-    proxy
-        .start()
-        .await
-        .context("failed to start Hudsucker proxy")
-}
-
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
-}
-
-#[derive(Debug)]
-struct Args {
-    port: u16,
-    ca_cert: Option<PathBuf>,
-    ca_key: Option<PathBuf>,
-}
-
-impl Args {
-    fn parse<I>(args: I) -> Self
-    where
-        I: IntoIterator<Item = String>,
-    {
-        let mut port = DEFAULT_PORT;
-        let mut ca_cert = std::env::var_os("TBH_CA_CERT").map(PathBuf::from);
-        let mut ca_key = std::env::var_os("TBH_CA_KEY").map(PathBuf::from);
-        let mut args = args.into_iter();
-
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "-p" | "--port" => {
-                    if let Some(value) = args.next().and_then(|value| value.parse::<u16>().ok()) {
-                        port = value;
-                    }
-                }
-                "--listen" | "--bind" => {
-                    if let Some(value) = args.next()
-                        && let Some(parsed) =
-                            value.rsplit(':').next().and_then(|p| p.parse::<u16>().ok())
-                    {
-                        port = parsed;
-                    }
-                }
-                "--ca-cert" => ca_cert = args.next().map(PathBuf::from),
-                "--ca-key" => ca_key = args.next().map(PathBuf::from),
-                "--set" => {
-                    let _ = args.next();
-                }
-                _ => {}
-            }
-        }
-
-        Self {
-            port,
-            ca_cert,
-            ca_key,
-        }
-    }
-}
-
 fn load_or_create_ca(
     cert_path: Option<PathBuf>,
     key_path: Option<PathBuf>,
-) -> Result<(String, String, PathBuf)> {
+) -> anyhow::Result<(String, String, PathBuf)> {
     let cert_path = cert_path.unwrap_or_else(default_ca_cert_path);
     let key_path = key_path.unwrap_or_else(default_ca_key_path);
 
     if cert_path.exists() && key_path.exists() {
         let cert_pem = fs::read_to_string(&cert_path)
-            .with_context(|| format!("failed to read CA certificate {}", cert_path.display()))?;
+            .map_err(|e| anyhow::anyhow!("failed to read CA certificate {}: {e}", cert_path.display()))?;
         let key_pem = fs::read_to_string(&key_path)
-            .with_context(|| format!("failed to read CA private key {}", key_path.display()))?;
+            .map_err(|e| anyhow::anyhow!("failed to read CA private key {}: {e}", key_path.display()))?;
         return Ok((cert_pem, key_pem, cert_path));
     }
 
     let parent = cert_path
         .parent()
-        .ok_or_else(|| anyhow!("CA certificate path has no parent: {}", cert_path.display()))?;
+        .ok_or_else(|| anyhow::anyhow!("CA certificate path has no parent: {}", cert_path.display()))?;
     fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create CA directory {}", parent.display()))?;
+        .map_err(|e| anyhow::anyhow!("failed to create CA directory {}: {e}", parent.display()))?;
     if let Some(parent) = key_path.parent() {
         fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create CA key directory {}", parent.display()))?;
+            .map_err(|e| anyhow::anyhow!("failed to create CA key directory {}: {e}", parent.display()))?;
     }
 
-    let key_pair = KeyPair::generate().context("failed to generate sidecar CA private key")?;
-    let mut params = CertificateParams::new(vec!["TaskBarHero Dashboard Local CA".to_string()])?;
+    let key_pair = KeyPair::generate()
+        .map_err(|e| anyhow::anyhow!("failed to generate sidecar CA private key: {e}"))?;
+    let mut params =
+        CertificateParams::new(vec!["TaskBarHero Dashboard Local CA".to_string()])
+            .map_err(|e| anyhow::anyhow!("failed to create CA certificate params: {e}"))?;
     params.distinguished_name = DistinguishedName::new();
     params
         .distinguished_name
@@ -678,14 +736,14 @@ fn load_or_create_ca(
 
     let cert = params
         .self_signed(&key_pair)
-        .context("failed to generate sidecar CA certificate")?;
+        .map_err(|e| anyhow::anyhow!("failed to generate sidecar CA certificate: {e}"))?;
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
     fs::write(&cert_path, &cert_pem)
-        .with_context(|| format!("failed to write CA certificate {}", cert_path.display()))?;
+        .map_err(|e| anyhow::anyhow!("failed to write CA certificate {}: {e}", cert_path.display()))?;
     fs::write(&key_path, &key_pem)
-        .with_context(|| format!("failed to write CA private key {}", key_path.display()))?;
+        .map_err(|e| anyhow::anyhow!("failed to write CA private key {}: {e}", key_path.display()))?;
 
     Ok((cert_pem, key_pem, cert_path))
 }
@@ -702,54 +760,4 @@ fn default_ca_key_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("tbhdashboard")
         .join("tbh-hudsucker-ca-key.pem")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_claimed_keys_from_process_box() {
-        let req = json!({
-            "functionName": "inventory",
-            "functionBody": {
-                "body": {
-                    "action": "processBox",
-                    "useItemKeyList": "[\"a\", \"manual-b\", \"c\"]"
-                }
-            }
-        });
-
-        assert_eq!(mark_claimed_from_backend_request(&req), vec!["a", "c"]);
-    }
-
-    #[test]
-    fn extracts_nested_chests() {
-        let obj = json!({
-            "result": "{\"data\":{\"boxes\":[{\"itemKey\":\"k\",\"claimableAt\":1}]}}"
-        });
-
-        let chests = extract_chests_from_any_json(&obj);
-        assert_eq!(chests.len(), 1);
-        assert_eq!(chests[0]["itemKey"], "k");
-    }
-
-    #[test]
-    fn extracts_processbox_info() {
-        let req = json!({
-            "functionName": "inventory",
-            "functionBody": {
-                "body": {
-                    "action": "processBox",
-                    "tn": "abc",
-                    "isReset": "true",
-                    "createItemList": "[{\"itemId\":910651,\"count\":2,\"dropKey\":7}]"
-                }
-            }
-        });
-
-        let info = get_processbox_info(&req).unwrap();
-        assert_eq!(info["isReset"], true);
-        assert_eq!(info["created"][0]["name"], "Common Treasure Chest");
-    }
 }

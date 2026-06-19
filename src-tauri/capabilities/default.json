@@ -6,20 +6,6 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "dialog:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "binaries/tbhd-sidecar",
-          "sidecar": true,
-          "args": [
-            "--set", "upstream_cert=false",
-            "-p", { "validator": "\\d+" }
-          ]
-        }
-      ]
-    },
-    "shell:allow-kill"
+    "dialog:default"
   ]
 }

@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn state_path_default() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("TBH_STATE");
+        unsafe { std::env::remove_var("TBH_STATE") };
         let p = state_path();
         assert!(p.to_string_lossy().contains("tbh_dashboard_state.json"));
     }
@@ -64,10 +64,10 @@ mod tests {
     #[test]
     fn state_path_env_override() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::set_var("TBH_STATE", "/tmp/test_state.json");
+        unsafe { std::env::set_var("TBH_STATE", "/tmp/test_state.json") };
         let p = state_path();
         assert_eq!(p, PathBuf::from("/tmp/test_state.json"));
-        std::env::remove_var("TBH_STATE");
+        unsafe { std::env::remove_var("TBH_STATE") };
     }
 
     #[test]

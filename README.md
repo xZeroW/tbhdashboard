@@ -8,7 +8,7 @@
   <img alt="Rust" src="https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white">
   <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white">
   <img alt="Leptos" src="https://img.shields.io/badge/UI-Leptos-EF3939">
-  <img alt="Rust sidecar" src="https://img.shields.io/badge/Sidecar-Rust-000000?logo=rust&logoColor=white">
+  <img alt="Rust proxy" src="https://img.shields.io/badge/Proxy-Rust-000000?logo=rust&logoColor=white">
   <img alt="Hudsucker" src="https://img.shields.io/badge/Capture-Hudsucker-FF7A00">
 </p>
 
@@ -25,7 +25,7 @@
 * 🔁 Previews reroll-generated queues after entering Act Boss stages.
 * 🎁 Displays Act Boss chest rewards after opening.
 * 🗺️ Ranks stages by selected item rarity using exported game data.
-* 🛰️ Starts a bundled Hudsucker MITM sidecar and persists state locally.
+* 🛰️ Starts a local Hudsucker MITM proxy and persists state locally.
 * 🛡️ Runs read-only through captured server responses; it does not modify game memory or packets.
 
 ## 🚀 Quick Start
@@ -56,11 +56,7 @@ Install Rust tools if needed:
 cargo install trunk tauri-cli
 ```
 
-Build the Rust sidecar for the current host target:
-
-```bash
-scripts/build-sidecar.sh
-```
+The proxy is built as part of the Tauri app — no separate build step needed.
 
 Run the app in development:
 
@@ -68,7 +64,7 @@ Run the app in development:
 cargo tauri dev
 ```
 
-The Tauri app starts the bundled Hudsucker sidecar automatically.
+The Tauri app starts the Hudsucker proxy automatically in-process.
 
 ## 🗃️ Game Data Setup
 
@@ -112,7 +108,7 @@ After a game patch, re-export with AssetRipper, replace `Assets/TextAsset`, and 
 
 ## 🎮 Using The Dashboard
 
-Launch TaskBarHero through the dashboard or through your own Steam launch options so the game's HTTPS traffic is routed through the local Hudsucker sidecar.
+Launch TaskBarHero through the dashboard or through your own Steam launch options so the game's HTTPS traffic is routed through the local Hudsucker proxy.
 
 The default proxy URL is:
 
@@ -128,7 +124,7 @@ HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=htt
 
 Once the game starts, the dashboard updates automatically as requests are captured.
 
-The Hudsucker sidecar persists its local CA certificate at:
+The proxy persists its local CA certificate at:
 
 ```text
 ~/.cache/tbhdashboard/tbh-hudsucker-ca.pem
@@ -207,17 +203,16 @@ Configures refresh interval, log level, proxy URL, Steam launch options, automat
 
 ### 🧱 Project Structure
 
-The app is a Tauri 2 desktop application with a Leptos WASM frontend, a Rust backend, and a Rust Hudsucker sidecar:
+The app is a Tauri 2 desktop application with a Leptos WASM frontend, a Rust backend, and an in-process Hudsucker MITM proxy:
 
 * `src/` contains the Leptos frontend and tab components.
 * `src-tauri/src/models.rs` contains typed app data.
 * `src-tauri/src/state.rs` owns JSON persistence through `StateRepository`.
 * `src-tauri/src/catalog.rs` loads exported game data and calculates drop odds.
 * `src-tauri/src/chests.rs` contains chest domain logic and row projection.
-* `src-tauri/src/capture.rs` parses sidecar capture messages and updates state.
+* `src-tauri/src/capture.rs` parses proxy capture messages and updates state.
 * `src-tauri/src/commands.rs` exposes Tauri command handlers to the frontend.
-* `src-tauri/src/sidecar.rs` starts and monitors the Hudsucker sidecar.
-* `rust-sidecar/src/main.rs` runs the MITM proxy and emits captured TaskBarHero responses as JSON lines.
+* `src-tauri/src/proxy.rs` starts and manages the in-process Hudsucker proxy.
 
 ### ✅ Tests
 
@@ -229,10 +224,9 @@ cargo test --workspace
 
 ### 📦 Build Package
 
-Build the sidecar and Tauri app locally:
+Build the Tauri app locally:
 
 ```bash
-scripts/build-sidecar.sh
 cargo tauri build
 ```
 
@@ -257,5 +251,5 @@ git push origin v0.1.0
 * It does not hook into TaskBarHero.
 * It does not read or write TaskBarHero process memory.
 * It does not modify packets or game data.
-* All displayed information comes from data already sent by the game servers and captured through the local Hudsucker sidecar.
+* All displayed information comes from data already sent by the game servers and captured through the local Hudsucker proxy.
 * Use at your own risk.

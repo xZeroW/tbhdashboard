@@ -34,7 +34,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/tbhd-sidecar"],
     "category": "Game",
     "shortDescription": "TaskBarHero game dashboard",
     "longDescription": "A read-only MITM proxy dashboard for TaskBarHero, tracking chest queues, boss drops, and farming efficiency."

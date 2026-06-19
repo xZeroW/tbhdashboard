@@ -4,12 +4,12 @@ mod chests;
 mod commands;
 mod config;
 mod models;
-mod sidecar;
+mod proxy;
 mod state;
 mod utils;
 
 use commands::ManagedState;
-use sidecar::SidecarManager;
+use proxy::ProxyManager;
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -21,15 +21,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(managed)
         .setup(|app| {
-            // Start sidecar on app launch
             let state = app.state::<ManagedState>();
-            let mut sidecar = SidecarManager::new(state.proxy_status());
-            sidecar.start(app.handle(), state.repo());
-            app.manage(Mutex::new(sidecar));
+            let mut proxy = ProxyManager::new(state.proxy_status());
+            proxy.start(app.handle(), state.repo());
+            app.manage(Mutex::new(proxy));
 
             let settings = state.repo().load().settings;
             if settings.launch_game_on_start {
@@ -67,7 +65,7 @@ pub fn run() {
 fn configure_linux_webkit_env() {
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         // Avoid WebKitGTK EGL crashes seen on some Linux/Wayland GPU stacks.
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
     }
 }
 
