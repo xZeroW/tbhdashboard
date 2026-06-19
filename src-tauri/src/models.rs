@@ -192,12 +192,12 @@ pub fn default_steam_launch_options() -> String {
 
 #[cfg(target_os = "windows")]
 fn default_steam_launch_options_for_os() -> String {
-    "cmd /c \"set HTTP_PROXY=http://127.0.0.1:8080 && set HTTPS_PROXY=http://127.0.0.1:8080 && %command%\"".to_string()
+    String::new()
 }
 
 #[cfg(not(target_os = "windows"))]
 fn default_steam_launch_options_for_os() -> String {
-    "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 http_proxy=http://127.0.0.1:8080 https_proxy=http://127.0.0.1:8080 all_proxy=http://127.0.0.1:8080 %command%".to_string()
+    "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

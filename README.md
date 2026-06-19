@@ -66,6 +66,44 @@ cargo tauri dev
 
 The Tauri app starts the Hudsucker proxy automatically in-process.
 
+### Windows Transparent Capture
+
+Windows does not rely on `HTTP_PROXY` or `HTTPS_PROXY` launch environment variables. The dashboard launches TaskBarHero normally, detects `taskbarhero.exe`, and starts the Windows-only network helper for that game process.
+
+The helper is a Proxifier-style adapter:
+
+* WinDivert captures outbound TCP traffic for the detected TaskBarHero PID, mainly port `443`.
+* The helper preserves the original destination IP and port.
+* Each redirected connection is converted to an HTTP proxy tunnel with `CONNECT original_ip:original_port HTTP/1.1`.
+* Bytes are piped as `game socket <-> helper <-> Hudsucker` after CONNECT succeeds.
+* The helper is stopped when the game exits or when the dashboard exits.
+
+Release builds bundle `tbhdashboard-nethelper.exe`, `WinDivert.dll`, and `WinDivert64.sys`. Users should not need to install Proxifier or copy WinDivert files manually; they only need to approve the helper UAC prompt when capture starts.
+
+For local source builds, build the helper on Windows:
+
+```powershell
+cargo build -p tbhdashboard-nethelper --release --target x86_64-pc-windows-msvc
+```
+
+Place the helper where the dashboard can find it:
+
+```text
+src-tauri/binaries/tbhdashboard-nethelper.exe
+```
+
+For local development, place `tbhdashboard-nethelper.exe` next to `TaskBarHeroDashboard.exe`, under `src-tauri/binaries/`, or set `TBH_NETHELPER` to the full helper path.
+
+WinDivert is required at runtime. Release builds include it. For local development, copy `WinDivert.dll` and `WinDivert64.sys` from a WinDivert 2.x release next to `tbhdashboard-nethelper.exe`. The helper must run with Administrator rights so the WinDivert driver can load. If it cannot start, the dashboard/helper logs explicit messages for missing Administrator rights, missing `WinDivert.dll`, missing `WinDivert64.sys`, or blocked driver loading.
+
+You can run the helper manually for diagnostics:
+
+```powershell
+tbhdashboard-nethelper.exe start --pid <taskbarhero_pid> --proxy 127.0.0.1:8080
+tbhdashboard-nethelper.exe status
+tbhdashboard-nethelper.exe stop
+```
+
 ## 🗃️ Game Data Setup
 
 The dashboard needs exported TaskBarHero data for item names, drop odds, and stage farming calculations. Release packages do not include exported `Assets/` by default.
@@ -121,6 +159,8 @@ For Steam launch options on Linux, the dashboard can use:
 ```text
 HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%
 ```
+
+On Windows, leave Steam launch options empty and use the transparent helper instead.
 
 Once the game starts, the dashboard updates automatically as requests are captured.
 

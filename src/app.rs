@@ -175,7 +175,9 @@ pub fn App() -> impl IntoView {
         spawn_local(async move {
             let settings = invoke::invoke_get_settings().await;
             set_steam_launch_options.set(settings.steam_launch_options.clone());
-            if !settings.steam_launch_options_prompted {
+            if !settings.steam_launch_options_prompted
+                && !settings.steam_launch_options.trim().is_empty()
+            {
                 set_show_launch_setup.set(true);
             }
         });

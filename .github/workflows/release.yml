@@ -10,6 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  WINDIVERT_VERSION: 2.2.2
 
 jobs:
   release:
@@ -58,6 +59,38 @@ jobs:
 
       - name: Install Tauri CLI
         run: cargo binstall tauri-cli --no-confirm
+
+      - name: Stage Windows network helper
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          cargo build -p tbhdashboard-nethelper --release --target ${{ matrix.target }}
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/tbhdashboard-nethelper.exe src-tauri/binaries/tbhdashboard-nethelper.exe -Force
+
+          $zip = "WinDivert-$env:WINDIVERT_VERSION-A.zip"
+          $url = "https://github.com/basil00/WinDivert/releases/download/v$env:WINDIVERT_VERSION/$zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath windivert -Force
+          Copy-Item "windivert/WinDivert-$env:WINDIVERT_VERSION-A/x64/WinDivert.dll" src-tauri/binaries/WinDivert.dll -Force
+          Copy-Item "windivert/WinDivert-$env:WINDIVERT_VERSION-A/x64/WinDivert64.sys" src-tauri/binaries/WinDivert64.sys -Force
+
+          @(
+            "src-tauri/binaries/tbhdashboard-nethelper.exe",
+            "src-tauri/binaries/WinDivert.dll",
+            "src-tauri/binaries/WinDivert64.sys"
+          ) | ForEach-Object {
+            if (!(Test-Path $_)) { throw "Missing required Windows bundle file: $_" }
+          }
+
+          $configPath = "src-tauri/tauri.conf.json"
+          $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          $config.bundle | Add-Member -NotePropertyName resources -NotePropertyValue @(
+            "binaries/tbhdashboard-nethelper.exe",
+            "binaries/WinDivert.dll",
+            "binaries/WinDivert64.sys"
+          ) -Force
+          $config | ConvertTo-Json -Depth 100 | Set-Content $configPath
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

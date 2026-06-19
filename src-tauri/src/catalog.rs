@@ -205,11 +205,11 @@ impl StaticCatalog {
             }
             let mut boxes = Vec::new();
             for (i, v) in row.iter().enumerate() {
-                if box_re.is_match(v) {
-                    if let Some(bid) = safe_int(v) {
-                        let count = row.get(i + 1).and_then(|s| safe_int(s)).unwrap_or(0) as i32;
-                        boxes.push((bid, count));
-                    }
+                if box_re.is_match(v)
+                    && let Some(bid) = safe_int(v)
+                {
+                    let count = row.get(i + 1).and_then(|s| safe_int(s)).unwrap_or(0) as i32;
+                    boxes.push((bid, count));
                 }
             }
             if !boxes.is_empty() {
@@ -230,12 +230,11 @@ impl StaticCatalog {
         }
         if let Some(info) = self.items.get(&iid) {
             let name_key = &info.name;
-            if let Some(id_str) = name_key.strip_prefix("ItemName_") {
-                if let Ok(id) = id_str.parse::<i64>() {
-                    if let Some(name) = self.display_names.get(&id) {
-                        return name.clone();
-                    }
-                }
+            if let Some(id_str) = name_key.strip_prefix("ItemName_")
+                && let Ok(id) = id_str.parse::<i64>()
+                && let Some(name) = self.display_names.get(&id)
+            {
+                return name.clone();
             }
             let subtype = if !info.subtype.is_empty() {
                 &info.subtype
@@ -376,15 +375,15 @@ impl StaticCatalog {
             .stages
             .iter()
             .filter(|s| {
-                if let Some(min) = min_level {
-                    if s.level < min {
-                        return false;
-                    }
+                if let Some(min) = min_level
+                    && s.level < min
+                {
+                    return false;
                 }
-                if let Some(max) = max_level {
-                    if s.level > max {
-                        return false;
-                    }
+                if let Some(max) = max_level
+                    && s.level > max
+                {
+                    return false;
                 }
                 true
             })

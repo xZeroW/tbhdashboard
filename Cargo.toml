@@ -1,6 +1,6 @@
 [package]
 name = "tbhdashboard-ui"
-version = "0.1.8"
+version = "1.0.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,7 +16,7 @@ console_error_panic_hook = "0.1.7"
 gloo-timers = { version = "0.3", features = ["futures"] }
 
 [workspace]
-members = ["src-tauri"]
+members = ["src-tauri", "src-tauri/nethelper"]
 
 [profile.release]
 codegen-units = 1

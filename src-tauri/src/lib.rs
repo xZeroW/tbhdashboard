@@ -4,6 +4,7 @@ mod chests;
 mod commands;
 mod config;
 mod models;
+mod nethelper;
 mod proxy;
 mod state;
 mod utils;
@@ -31,15 +32,16 @@ pub fn run() {
             let mut proxy = ProxyManager::new(state.proxy_status());
             proxy.start(app.handle(), state.repo());
             app.manage(Mutex::new(proxy));
+            app.manage(nethelper::NetHelperCleanup);
 
             let settings = state.repo().load().settings;
-            if settings.launch_game_on_start {
-                if commands::launch_game_from_settings(&settings).ok {
-                    let repo_path = state.repo().path.clone();
-                    std::thread::spawn(move || {
-                        commands::monitor_game_process(repo_path);
-                    });
-                }
+            if settings.launch_game_on_start && commands::launch_game_from_settings(&settings).ok {
+                let repo_path = state.repo().path.clone();
+                let app_handle = app.handle().clone();
+                let proxy_url = settings.proxy_url.clone();
+                std::thread::spawn(move || {
+                    commands::monitor_game_process(repo_path, app_handle, proxy_url);
+                });
             }
 
             Ok(())

@@ -3,24 +3,25 @@ use crate::commands::ProxyStatus;
 use crate::state::StateRepository;
 use http_body_util::BodyExt;
 use hudsucker::{
-    certificate_authority::RcgenAuthority, decode_response,
-    hyper::{header::HOST, Request, Response, StatusCode},
+    Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
+    certificate_authority::RcgenAuthority,
+    decode_response,
+    hyper::{Request, Response, StatusCode, header::HOST},
     rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
         KeyUsagePurpose,
     },
     rustls::crypto::aws_lc_rs,
-    Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     fs,
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter};
@@ -86,7 +87,9 @@ impl ProxyManager {
                     let user_msg = if msg.contains("address already in use")
                         || msg.contains("Address already in use")
                     {
-                        format!("Proxy port {DEFAULT_PORT} is already in use. Close the other app using it and restart the dashboard.")
+                        format!(
+                            "Proxy port {DEFAULT_PORT} is already in use. Close the other app using it and restart the dashboard."
+                        )
                     } else {
                         format!("Proxy error: {msg}")
                     };
@@ -701,28 +704,33 @@ fn load_or_create_ca(
     let key_path = key_path.unwrap_or_else(default_ca_key_path);
 
     if cert_path.exists() && key_path.exists() {
-        let cert_pem = fs::read_to_string(&cert_path)
-            .map_err(|e| anyhow::anyhow!("failed to read CA certificate {}: {e}", cert_path.display()))?;
-        let key_pem = fs::read_to_string(&key_path)
-            .map_err(|e| anyhow::anyhow!("failed to read CA private key {}: {e}", key_path.display()))?;
+        let cert_pem = fs::read_to_string(&cert_path).map_err(|e| {
+            anyhow::anyhow!("failed to read CA certificate {}: {e}", cert_path.display())
+        })?;
+        let key_pem = fs::read_to_string(&key_path).map_err(|e| {
+            anyhow::anyhow!("failed to read CA private key {}: {e}", key_path.display())
+        })?;
         return Ok((cert_pem, key_pem, cert_path));
     }
 
-    let parent = cert_path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("CA certificate path has no parent: {}", cert_path.display()))?;
+    let parent = cert_path.parent().ok_or_else(|| {
+        anyhow::anyhow!("CA certificate path has no parent: {}", cert_path.display())
+    })?;
     fs::create_dir_all(parent)
         .map_err(|e| anyhow::anyhow!("failed to create CA directory {}: {e}", parent.display()))?;
     if let Some(parent) = key_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| anyhow::anyhow!("failed to create CA key directory {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to create CA key directory {}: {e}",
+                parent.display()
+            )
+        })?;
     }
 
     let key_pair = KeyPair::generate()
         .map_err(|e| anyhow::anyhow!("failed to generate sidecar CA private key: {e}"))?;
-    let mut params =
-        CertificateParams::new(vec!["TaskBarHero Dashboard Local CA".to_string()])
-            .map_err(|e| anyhow::anyhow!("failed to create CA certificate params: {e}"))?;
+    let mut params = CertificateParams::new(vec!["TaskBarHero Dashboard Local CA".to_string()])
+        .map_err(|e| anyhow::anyhow!("failed to create CA certificate params: {e}"))?;
     params.distinguished_name = DistinguishedName::new();
     params
         .distinguished_name
@@ -740,10 +748,15 @@ fn load_or_create_ca(
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
-    fs::write(&cert_path, &cert_pem)
-        .map_err(|e| anyhow::anyhow!("failed to write CA certificate {}: {e}", cert_path.display()))?;
-    fs::write(&key_path, &key_pem)
-        .map_err(|e| anyhow::anyhow!("failed to write CA private key {}: {e}", key_path.display()))?;
+    fs::write(&cert_path, &cert_pem).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to write CA certificate {}: {e}",
+            cert_path.display()
+        )
+    })?;
+    fs::write(&key_path, &key_pem).map_err(|e| {
+        anyhow::anyhow!("failed to write CA private key {}: {e}", key_path.display())
+    })?;
 
     Ok((cert_pem, key_pem, cert_path))
 }

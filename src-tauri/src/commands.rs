@@ -11,6 +11,7 @@ use crate::catalog::StaticCatalog;
 use crate::chests;
 use crate::config;
 use crate::models::*;
+use crate::nethelper;
 use crate::state::StateRepository;
 
 const STEAM_APP_ID: &str = "3678970";
@@ -102,14 +103,15 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
 }
 
 #[tauri::command]
-pub fn launch_game(state: State<'_, ManagedState>) -> LaunchGameResult {
+pub fn launch_game(app: tauri::AppHandle, state: State<'_, ManagedState>) -> LaunchGameResult {
     let settings = state.repo().load().settings;
     chests::clear_all(state.repo());
     let result = launch_game_from_settings(&settings);
     if result.ok {
         let repo_path = state.repo().path.clone();
+        let proxy_url = settings.proxy_url.clone();
         std::thread::spawn(move || {
-            monitor_game_process(repo_path);
+            monitor_game_process(repo_path, app, proxy_url);
         });
     }
     result
@@ -130,7 +132,7 @@ pub fn launch_game_from_settings(settings: &AppSettings) -> LaunchGameResult {
 }
 
 fn launch_success_message() -> String {
-    "Launch request sent. Capture requires the Steam Launch Options shown at startup.".to_string()
+    "Starting game...".to_string()
 }
 
 fn launch_steam_app(settings: &AppSettings) -> Result<(), String> {
@@ -160,11 +162,12 @@ fn apply_proxy_env(command: &mut Command, proxy_url: &str) {
 }
 
 #[cfg(target_os = "windows")]
-fn open_steam_app(proxy_url: &str) -> Result<(), String> {
+fn open_steam_app(_proxy_url: &str) -> Result<(), String> {
     let steam_url = steam_run_url();
-    let mut command = Command::new("steam");
-    apply_proxy_env(&mut command, proxy_url);
-    let direct = command.arg("-applaunch").arg(STEAM_APP_ID).spawn();
+    let direct = Command::new("steam")
+        .arg("-applaunch")
+        .arg(STEAM_APP_ID)
+        .spawn();
     if direct.is_ok() {
         return Ok(());
     }
@@ -392,14 +395,30 @@ pub async fn browse_assets_folder(window: tauri::Window) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-pub fn monitor_game_process(repo_path: PathBuf) {
+pub fn monitor_game_process(repo_path: PathBuf, app: tauri::AppHandle, proxy_url: String) {
     let repo = crate::state::StateRepository::new(repo_path);
     std::thread::sleep(std::time::Duration::from_secs(15));
     let mut was_running = is_game_running();
+    #[cfg(not(target_os = "windows"))]
+    let _ = (&app, &proxy_url);
+    #[cfg(target_os = "windows")]
+    let mut attached_pid = None;
     loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
+
+        #[cfg(target_os = "windows")]
+        if attached_pid.is_none() {
+            if let Some(pid) = find_game_pid() {
+                match nethelper::start_for_game(&app, pid, &proxy_url) {
+                    Ok(()) => attached_pid = Some(pid),
+                    Err(err) => eprintln!("[TBH] Windows network helper error: {err}"),
+                }
+            }
+        }
+
         let is_running = is_game_running();
         if was_running && !is_running {
+            nethelper::stop();
             chests::clear_all(&repo);
             return;
         }
@@ -438,25 +457,51 @@ fn is_game_running() -> bool {
         }
         #[cfg(target_os = "linux")]
         {
-            std::fs::read_dir("/proc").map(|entries| {
-                entries.flatten().any(|entry| {
-                    let name = entry.file_name();
-                    let name_str = name.to_string_lossy();
-                    if !name_str.chars().all(|c| c.is_ascii_digit()) {
-                        return false;
-                    }
-                    if let Ok(cmdline) = std::fs::read_to_string(entry.path().join("cmdline"))
-                    {
-                        names.iter().any(|g| cmdline.contains(g))
-                    } else {
-                        false
-                    }
+            std::fs::read_dir("/proc")
+                .map(|entries| {
+                    entries.flatten().any(|entry| {
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        if !name_str.chars().all(|c| c.is_ascii_digit()) {
+                            return false;
+                        }
+                        if let Ok(cmdline) = std::fs::read_to_string(entry.path().join("cmdline")) {
+                            names.iter().any(|g| cmdline.contains(g))
+                        } else {
+                            false
+                        }
+                    })
                 })
-            }).unwrap_or(false)
+                .unwrap_or(false)
         }
         #[cfg(not(target_os = "linux"))]
         {
             false
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn find_game_pid() -> Option<u32> {
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq taskbarhero.exe", "/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().find_map(parse_tasklist_pid)
+}
+
+#[cfg(target_os = "windows")]
+fn parse_tasklist_pid(line: &str) -> Option<u32> {
+    let mut parts = line.trim().trim_matches('"').split("\",\"");
+    let image = parts.next()?;
+    let pid = parts.next()?;
+    if !image.eq_ignore_ascii_case("taskbarhero.exe") {
+        return None;
+    }
+    pid.parse().ok()
 }

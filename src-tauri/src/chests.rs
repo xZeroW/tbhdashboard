@@ -138,13 +138,13 @@ pub fn mark_claimed_by_keys(keys: &[String], source: &str, repo: &StateRepositor
         if key.is_empty() {
             continue;
         }
-        if let Some(chest) = state.chests.get_mut(key) {
-            if !chest.is_get {
-                chest.is_get = true;
-                chest.claimed_at = Some(now.clone());
-                chest.claim_source = Some(source.to_string());
-                changed += 1;
-            }
+        if let Some(chest) = state.chests.get_mut(key)
+            && !chest.is_get
+        {
+            chest.is_get = true;
+            chest.claimed_at = Some(now.clone());
+            chest.claim_source = Some(source.to_string());
+            changed += 1;
         }
     }
     if changed > 0 {
