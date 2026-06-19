@@ -195,6 +195,16 @@ pub fn get_rows(
     rows
 }
 
+pub fn clear_all(repo: &StateRepository) {
+    let mut state = repo.load();
+    let count = state.chests.len();
+    state.chests.clear();
+    if count > 0 {
+        repo.add_event(&mut state, &format!("Queue cleared ({} chests)", count));
+    }
+    let _ = repo.save(&state);
+}
+
 pub fn box_summary(repo: &StateRepository) -> HashMap<String, usize> {
     let state = repo.load();
     let mut summary: HashMap<String, usize> = HashMap::new();

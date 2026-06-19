@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -103,7 +104,15 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
 #[tauri::command]
 pub fn launch_game(state: State<'_, ManagedState>) -> LaunchGameResult {
     let settings = state.repo().load().settings;
-    launch_game_from_settings(&settings)
+    chests::clear_all(state.repo());
+    let result = launch_game_from_settings(&settings);
+    if result.ok {
+        let repo_path = state.repo().path.clone();
+        std::thread::spawn(move || {
+            monitor_game_process(repo_path);
+        });
+    }
+    result
 }
 
 pub fn launch_game_from_settings(settings: &AppSettings) -> LaunchGameResult {
@@ -381,4 +390,73 @@ pub async fn browse_assets_folder(window: tauri::Window) -> Option<String> {
     path.into_path()
         .ok()
         .map(|p| p.to_string_lossy().into_owned())
+}
+
+pub fn monitor_game_process(repo_path: PathBuf) {
+    let repo = crate::state::StateRepository::new(repo_path);
+    std::thread::sleep(std::time::Duration::from_secs(15));
+    let mut was_running = is_game_running();
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let is_running = is_game_running();
+        if was_running && !is_running {
+            chests::clear_all(&repo);
+            return;
+        }
+        was_running = is_running;
+    }
+}
+
+fn is_game_running() -> bool {
+    let names = ["TaskbarHero", "TaskBar Hero"];
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("tasklist")
+            .arg("/FI")
+            .arg("IMAGENAME eq TaskbarHero.exe")
+            .arg("/NH")
+            .output()
+            .map(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                names.iter().any(|n| s.contains(n))
+            })
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let pgrep = names.iter().any(|name| {
+            std::process::Command::new("pgrep")
+                .args(["-f", "-i", name])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        });
+        if pgrep {
+            return true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_dir("/proc").map(|entries| {
+                entries.flatten().any(|entry| {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if !name_str.chars().all(|c| c.is_ascii_digit()) {
+                        return false;
+                    }
+                    if let Ok(cmdline) = std::fs::read_to_string(entry.path().join("cmdline"))
+                    {
+                        names.iter().any(|g| cmdline.contains(g))
+                    } else {
+                        false
+                    }
+                })
+            }).unwrap_or(false)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
 }

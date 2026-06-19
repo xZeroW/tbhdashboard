@@ -25,13 +25,21 @@ pub fn run() {
         .manage(managed)
         .setup(|app| {
             let state = app.state::<ManagedState>();
+
+            chests::clear_all(state.repo());
+
             let mut proxy = ProxyManager::new(state.proxy_status());
             proxy.start(app.handle(), state.repo());
             app.manage(Mutex::new(proxy));
 
             let settings = state.repo().load().settings;
             if settings.launch_game_on_start {
-                let _ = commands::launch_game_from_settings(&settings);
+                if commands::launch_game_from_settings(&settings).ok {
+                    let repo_path = state.repo().path.clone();
+                    std::thread::spawn(move || {
+                        commands::monitor_game_process(repo_path);
+                    });
+                }
             }
 
             Ok(())
