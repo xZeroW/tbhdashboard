@@ -4,14 +4,25 @@ use crate::app::{
 use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use std::collections::{BTreeSet, HashMap};
 
 #[component]
 pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
     let (rows, set_rows) = signal(Vec::<invoke::ChestRow>::new());
-    let (_summary, set_summary) = signal(std::collections::HashMap::<String, usize>::new());
-    let (filter_tab, set_filter_tab) = signal("ALL".to_string());
+    let (_summary, set_summary) = signal(HashMap::<String, usize>::new());
     let (show_claimable_only, set_show_claimable_only) = signal(false);
     let (show_claimed, set_show_claimed) = signal(false);
+    let (rarity_options, set_rarity_options) = signal(Vec::<String>::new());
+    let (filter_cats, set_filter_cats) = signal(HashMap::<String, String>::new());
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let options = invoke::invoke_get_rarity_order().await;
+            if !options.is_empty() {
+                set_rarity_options.set(options);
+            }
+        });
+    });
 
     let fetch_data = move || {
         let include_claimed = show_claimed.get();
@@ -29,10 +40,42 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
         fetch_data();
     });
 
+    let categories = move || {
+        let set: BTreeSet<String> = rows
+            .get()
+            .iter()
+            .map(|r| {
+                if r.slot.is_empty() {
+                    r.kind.clone()
+                } else {
+                    r.slot.clone()
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        set.into_iter().collect::<Vec<_>>()
+    };
+
+    Effect::new(move |_| {
+        let cats = categories();
+        let mut filters = filter_cats.get();
+        let mut changed = false;
+        for cat in &cats {
+            if !filters.contains_key(cat) {
+                filters.insert(cat.clone(), "ALL".to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            set_filter_cats.set(filters);
+        }
+    });
+
     let filtered_rows = move || {
-        let tab = filter_tab.get();
         let only_claimable = show_claimable_only.get();
         let show_claimed = show_claimed.get();
+        let filters = filter_cats.get();
+        let options = rarity_options.get();
         rows.get()
             .into_iter()
             .filter(|r| {
@@ -42,22 +85,24 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                 if only_claimable && r.remaining > 0.0 {
                     return false;
                 }
-                match tab.as_str() {
-                    "Common" => r.box_label.contains("Common"),
-                    "Stage" => r.box_label.contains("Stage"),
-                    "Boss" => r.box_label.contains("Boss"),
-                    _ => true,
+                let cat = if r.slot.is_empty() { &r.kind } else { &r.slot };
+                let filt = filters
+                    .get(cat.as_str())
+                    .map(String::as_str)
+                    .unwrap_or("ALL");
+                if filt == "ALL" {
+                    return true;
+                }
+                match options.iter().position(|x| x == filt) {
+                    Some(min_idx) => options
+                        .iter()
+                        .position(|x| x == &r.rarity)
+                        .map(|ri| ri >= min_idx)
+                        .unwrap_or(false),
+                    None => false,
                 }
             })
             .collect::<Vec<_>>()
-    };
-
-    let _stats = move || {
-        let all = rows.get();
-        let total = all.len();
-        let ready = all.iter().filter(|r| r.remaining <= 0.0).count();
-        let waiting = total - ready;
-        (total, ready, waiting)
     };
 
     view! {
@@ -82,19 +127,27 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
             </div>
         </div>
 
-        <div class="filter-tabs">
-            {["ALL", "Common", "Stage", "Boss"].iter().map(|&tab| {
-                let t = tab.to_string();
-                let is_active = move || filter_tab.get() == t;
-                view! {
-                    <button
-                        class="filter-tab"
-                        class:active=is_active
-                        on:click=move |_| set_filter_tab.set(tab.to_string())
-                    >{tab}</button>
-                }
-            }).collect::<Vec<_>>()}
-        </div>
+        <details class="filter-details" open>
+            <summary class="filter-summary">"FILTERS"</summary>
+            <div class="filter-row">
+                <For each=categories key=|cat| cat.clone() let(cat)>
+                    <label>
+                        {cat.clone()}
+                        <select on:change=move |ev| {
+                            let v = event_target_value(&ev);
+                            let c = cat.clone();
+                            set_filter_cats.update(|f| { f.insert(c, v); });
+                        }>
+                            <option value="ALL">"ALL"</option>
+                            {rarity_options.get().into_iter().map(|r| {
+                                let opt = r.clone();
+                                view! { <option value=opt>{r}</option> }
+                            }).collect::<Vec<_>>()}
+                        </select>
+                    </label>
+                </For>
+            </div>
+        </details>
 
         <div class="table-panel">
             <table class="data-table">
@@ -110,76 +163,62 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                     </tr>
                 </thead>
                 <tbody>
-                    {move || filtered_rows().into_iter().enumerate().map(|(i, row)| {
-                        let is_ready = row.remaining <= 0.0;
-                        let remaining_display = if is_ready {
-                            "--".to_string()
-                        } else {
-                            let secs = row.remaining as i64;
-                            let h = secs / 3600;
-                            let m = (secs % 3600) / 60;
-                            let s = secs % 60;
-                            format!("{:02}:{:02}:{:02}", h, m, s)
-                        };
-                        let progress = if is_ready {
-                            100.0
-                        } else {
-                            ((86400.0 - row.remaining) / 86400.0 * 100.0).min(100.0)
-                        };
-                        let color = rarity_color(&row.rarity);
-                        let badge_class = format!("rarity-badge {}", rarity_class(&row.rarity));
-                        let ce = chest_emoji(&row.box_label);
-                        let re = reward_emoji(&row.rarity);
-                        let key_for_open = row.key.clone().unwrap_or_default();
-                        view! {
-                            <tr>
-                                <td style="color: var(--text-dim)">{i + 1}</td>
-                                <td>
-                                    <div class="cell-type">
-                                        <span class="type-icon">{ce}</span>
-                                        <span>{row.box_label}</span>
+                    <For each=filtered_rows key=|row| row.key.clone().unwrap_or_default() let(row)>
+                        <tr>
+                            <td style="color: var(--text-dim)">{row.reward_id.unwrap_or(0)}</td>
+                            <td>
+                                <div class="cell-type">
+                                    <span class="type-icon">{chest_emoji(&row.box_label)}</span>
+                                    <span>{row.box_label.clone()}</span>
+                                </div>
+                            </td>
+                            <td>
+                                {if row.is_get {
+                                    view! { <span class="pill purple"><span class="pill-dot">"\u{2714}\u{fe0f}"</span> " Claimed"</span> }.into_any()
+                                } else if row.remaining <= 0.0 {
+                                    view! { <span class="pill green"><span class="pill-dot">"\u{25cf}"</span> " Claimable"</span> }.into_any()
+                                } else {
+                                    view! { <span class="pill gray"><span class="pill-dot">"\u{1f512}"</span> " Waiting"</span> }.into_any()
+                                }}
+                            </td>
+                            <td>
+                                <div class="unlock-cell">
+                                    <div class="unlock-bar">
+                                        <div class="unlock-bar-fill" style:width={format!("{}%", ((86400.0 - row.remaining) / 86400.0 * 100.0).min(100.0))}></div>
                                     </div>
-                                </td>
-                                <td>
-                                    {if row.is_get {
-                                        view! { <span class="pill purple"><span class="pill-dot">"\u{2714}\u{fe0f}"</span> " Claimed"</span> }.into_any()
-                                    } else if is_ready {
-                                        view! { <span class="pill green"><span class="pill-dot">"\u{25cf}"</span> " Claimable"</span> }.into_any()
+                                    {if row.remaining <= 0.0 {
+                                        view! { <span class="unlock-time">"--"</span> }.into_any()
                                     } else {
-                                        view! { <span class="pill gray"><span class="pill-dot">"\u{1f512}"</span> " Waiting"</span> }.into_any()
+                                        let secs = row.remaining as i64;
+                                        let h = secs / 3600;
+                                        let m = (secs % 3600) / 60;
+                                        let s = secs % 60;
+                                        view! { <span class="unlock-time">{format!("{:02}:{:02}:{:02}", h, m, s)}</span> }.into_any()
                                     }}
-                                </td>
-                                <td>
-                                    <div class="unlock-cell">
-                                        <div class="unlock-bar">
-                                            <div class="unlock-bar-fill" style:width={format!("{}%", progress)}></div>
-                                        </div>
-                                        <span class="unlock-time">{remaining_display}</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <div class="cell-reward">
-                                        <span class="rw-icon">{re}</span>
-                                        <span class="rw-name">{row.name}</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class=badge_class style:color=color>
-                                        <span class="diamond">{rarity_diamond(&row.rarity)}</span>
-                                        {rarity_title(&row.rarity)}
-                                    </span>
-                                </td>
-                                <td>
-                                    <button class="btn-open" on:click=move |_| {
-                                        let k = key_for_open.clone();
-                                        spawn_local(async move {
-                                            crate::invoke::invoke_mark_opened(&k).await;
-                                        });
-                                    }>"\u{2714}\u{fe0f}"</button>
-                                </td>
-                            </tr>
-                        }
-                    }).collect::<Vec<_>>()}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="cell-reward">
+                                    <span class="rw-icon">{reward_emoji(&row.rarity)}</span>
+                                    <span class="rw-name">{row.name.clone()}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <span class={format!("rarity-badge {}", rarity_class(&row.rarity))} style:color=rarity_color(&row.rarity)>
+                                    <span class="diamond">{rarity_diamond(&row.rarity)}</span>
+                                    {rarity_title(&row.rarity)}
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn-open" on:click=move |_| {
+                                    let k = row.key.clone().unwrap_or_default();
+                                    spawn_local(async move {
+                                        crate::invoke::invoke_mark_opened(&k).await;
+                                    });
+                                }>"\u{2714}\u{fe0f}"</button>
+                            </td>
+                        </tr>
+                    </For>
                 </tbody>
             </table>
         </div>

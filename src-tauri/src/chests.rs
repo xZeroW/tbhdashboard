@@ -174,6 +174,7 @@ pub fn get_rows(
                 .map(|cl| (cl - now).num_seconds() as f64)
                 .unwrap_or(0.0);
             let (rarity, name) = catalog.item_parts(c.reward_item_id);
+            let (kind, slot) = catalog.item_kind_slot(c.reward_item_id);
             ChestRow {
                 remaining,
                 claim: c.claimable_at.as_deref().and_then(parse_dt),
@@ -182,6 +183,8 @@ pub fn get_rows(
                 reward_id: c.reward_item_id,
                 rarity,
                 name,
+                kind,
+                slot,
                 is_get: c.is_get,
             }
         })

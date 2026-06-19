@@ -22,6 +22,10 @@ pub struct ChestRow {
     pub reward_id: Option<i64>,
     pub rarity: String,
     pub name: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub slot: String,
     #[serde(rename = "isGet")]
     pub is_get: bool,
 }

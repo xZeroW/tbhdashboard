@@ -400,6 +400,13 @@ impl StaticCatalog {
         rows
     }
 
+    pub fn item_kind_slot(&self, iid: Option<i64>) -> (String, String) {
+        match iid.and_then(|id| self.items.get(&id)) {
+            Some(info) => (info.kind.clone(), info.slot.clone()),
+            None => (String::new(), String::new()),
+        }
+    }
+
     pub fn items_count(&self) -> usize {
         self.items.len()
     }
