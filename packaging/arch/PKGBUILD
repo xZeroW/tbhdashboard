@@ -51,8 +51,7 @@ build() {
   export CFLAGS="${CFLAGS/-flto=auto/}"
   export CXXFLAGS="${CXXFLAGS/-flto=auto/}"
 
-  # sidecar binary is pre-built in src-tauri/binaries/; the repo does not
-  # ship a build-sidecar script.  The PKGBUILD expects it to exist already.
+  # Proxy is embedded in the main binary (commit 00be653). No sidecar binary needed.
 
   # Build WASM frontend with explicit --release; under makepkg trunk build
   # without --release unexpectedly defaults to dev profile.
@@ -72,7 +71,8 @@ build() {
     cat > "$wasm_opt_bin" << 'WRAPPER'
 #!/bin/bash
 exec "$(dirname "$0")/wasm-opt.real" \
-  --enable-bulk-memory --enable-bulk-memory-opt --enable-sign-ext "$@"
+  --enable-bulk-memory --enable-bulk-memory-opt \
+  --enable-sign-ext --enable-nontrapping-float-to-int "$@"
 WRAPPER
     chmod +x "$wasm_opt_bin"
   fi
@@ -83,17 +83,14 @@ WRAPPER
   # Prevent cargo tauri build from re-running trunk build (which lacks --release)
   sed -i 's/"beforeBuildCommand": "trunk build"/"beforeBuildCommand": ""/' src-tauri/tauri.conf.json
 
+  # sidecar was removed in commit 00be653; proxy is now embedded in main binary.
   cargo tauri build --no-bundle --ci
 }
 
 package() {
   cd "$srcdir/$_pkgname"
 
-  local target_triple
-  target_triple="$(rustc --print host-tuple)"
-
   install -Dm755 "target/release/tbhdashboard" "$pkgdir/usr/bin/TaskBarHeroDashboard"
-  install -Dm755 "src-tauri/binaries/tbhd-sidecar-$target_triple" "$pkgdir/usr/bin/tbhd-sidecar"
   install -Dm644 "src-tauri/icons/128x128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/tbhdashboard.png"
 
   install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/tbhdashboard.desktop" <<'EOF'
