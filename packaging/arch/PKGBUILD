@@ -1,0 +1,79 @@
+# Maintainer: xZeroW
+
+pkgname=tbhdashboard-git-local
+_pkgname=tbhdashboard
+pkgver=0.1.8
+pkgrel=1
+pkgdesc="Native Arch package for TaskBarHero Dashboard built from the local checkout"
+arch=('x86_64')
+url="https://github.com/xZeroW/tbhdashboard"
+license=('unknown')
+depends=(
+  'gtk3'
+  'hicolor-icon-theme'
+  'libayatana-appindicator'
+  'openssl'
+  'webkit2gtk-4.1'
+)
+makedepends=(
+  'cargo'
+  'cargo-tauri'
+  'rust'
+  'trunk'
+)
+source=()
+
+prepare() {
+  local project_root
+  project_root="$(realpath "$startdir/../..")"
+
+  rm -rf "$srcdir/$_pkgname"
+  mkdir -p "$srcdir/$_pkgname"
+
+  bsdtar \
+    --exclude='./.git' \
+    --exclude='./Assets' \
+    --exclude='./dist' \
+    --exclude='./target' \
+    --exclude='./src-tauri/target' \
+    --exclude='./sidecar/dist' \
+    --exclude='./packaging/arch/pkg' \
+    --exclude='./packaging/arch/src' \
+    -cf - -C "$project_root" . | bsdtar -xf - -C "$srcdir/$_pkgname"
+}
+
+build() {
+  cd "$srcdir/$_pkgname"
+
+  # makepkg injects -flto=auto into CFLAGS/CXXFLAGS, which breaks native C
+  # static crates (aws-lc-sys, ring, zstd-sys) when linked into Rust.
+  # Strip LTO flags for the Cargo build only.
+  export CFLAGS="${CFLAGS/-flto=auto/}"
+  export CXXFLAGS="${CXXFLAGS/-flto=auto/}"
+
+  scripts/build-sidecar.sh
+  cargo tauri build --no-bundle --ci
+}
+
+package() {
+  cd "$srcdir/$_pkgname"
+
+  local target_triple
+  target_triple="$(rustc --print host-tuple)"
+
+  install -Dm755 "target/release/tbhdashboard" "$pkgdir/usr/bin/TaskBarHeroDashboard"
+  install -Dm755 "src-tauri/binaries/tbhd-sidecar-$target_triple" "$pkgdir/usr/bin/tbhd-sidecar"
+  install -Dm644 "src-tauri/icons/128x128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/tbhdashboard.png"
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/tbhdashboard.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=TaskBarHero Dashboard
+Comment=Read-only dashboard for TaskBarHero chest queues and farming data
+Exec=TaskBarHeroDashboard
+Icon=tbhdashboard
+Terminal=false
+Categories=Game;
+StartupWMClass=TaskBarHeroDashboard
+EOF
+}

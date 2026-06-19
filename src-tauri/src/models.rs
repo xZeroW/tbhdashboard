@@ -152,6 +152,8 @@ pub struct AppSettings {
     pub steam_launch_options: String,
     #[serde(default)]
     pub launch_game_on_start: bool,
+    #[serde(default)]
+    pub steam_launch_options_prompted: bool,
 }
 
 impl Default for AppSettings {
@@ -163,6 +165,7 @@ impl Default for AppSettings {
             include_steam_launch_options: false,
             steam_launch_options: default_steam_launch_options(),
             launch_game_on_start: false,
+            steam_launch_options_prompted: false,
         }
     }
 }
@@ -190,7 +193,7 @@ fn default_steam_launch_options_for_os() -> String {
 
 #[cfg(not(target_os = "windows"))]
 fn default_steam_launch_options_for_os() -> String {
-    "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%".to_string()
+    "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 http_proxy=http://127.0.0.1:8080 https_proxy=http://127.0.0.1:8080 all_proxy=http://127.0.0.1:8080 %command%".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

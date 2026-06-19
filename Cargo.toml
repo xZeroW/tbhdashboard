@@ -16,7 +16,7 @@ console_error_panic_hook = "0.1.7"
 gloo-timers = { version = "0.3", features = ["futures"] }
 
 [workspace]
-members = ["src-tauri"]
+members = ["src-tauri", "rust-sidecar"]
 
 [profile.release]
 codegen-units = 1

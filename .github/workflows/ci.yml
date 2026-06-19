@@ -49,11 +49,6 @@ jobs:
       - name: Install Trunk
         run: cargo binstall trunk --no-confirm
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
 
@@ -65,6 +60,3 @@ jobs:
 
       - name: Build frontend
         run: trunk build
-
-      - name: Check Python sidecar syntax
-        run: python -m py_compile sidecar/main.py sidecar/addon.py

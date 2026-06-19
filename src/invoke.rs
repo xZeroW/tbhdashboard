@@ -104,6 +104,7 @@ pub struct AppSettings {
     pub include_steam_launch_options: bool,
     pub steam_launch_options: String,
     pub launch_game_on_start: bool,
+    pub steam_launch_options_prompted: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -121,6 +122,7 @@ impl Default for AppSettings {
             include_steam_launch_options: false,
             steam_launch_options: String::new(),
             launch_game_on_start: false,
+            steam_launch_options_prompted: false,
         }
     }
 }

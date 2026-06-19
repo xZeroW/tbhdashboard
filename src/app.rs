@@ -168,6 +168,18 @@ pub fn App() -> impl IntoView {
     let (chest_rows, set_chest_rows) = signal(Vec::<invoke::ChestRow>::new());
     let (launching_game, set_launching_game) = signal(false);
     let (launch_status, set_launch_status) = signal(None::<invoke::LaunchGameResult>);
+    let (show_launch_setup, set_show_launch_setup) = signal(false);
+    let (steam_launch_options, set_steam_launch_options) = signal(String::new());
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let settings = invoke::invoke_get_settings().await;
+            set_steam_launch_options.set(settings.steam_launch_options.clone());
+            if !settings.steam_launch_options_prompted {
+                set_show_launch_setup.set(true);
+            }
+        });
+    });
 
     spawn_local(async move {
         loop {
@@ -260,8 +272,36 @@ pub fn App() -> impl IntoView {
             .unwrap_or_else(|| "In Queue".to_string())
     };
 
+    let acknowledge_launch_setup = move |_| {
+        set_show_launch_setup.set(false);
+        spawn_local(async move {
+            let mut settings = invoke::invoke_get_settings().await;
+            settings.steam_launch_options_prompted = true;
+            settings.include_steam_launch_options = true;
+            invoke::invoke_set_settings(settings).await;
+        });
+    };
+
     view! {
         <div class="app-root">
+            <div style:display=move || if show_launch_setup.get() { "flex" } else { "none" }
+                style="position: fixed; inset: 0; z-index: 50; align-items: center; justify-content: center; background: rgba(2, 6, 23, 0.78); padding: 24px;">
+                <div style="width: min(720px, 100%); border: 1px solid var(--border); background: var(--panel); box-shadow: 0 24px 80px rgba(0,0,0,.45); padding: 24px; border-radius: 14px;">
+                    <div class="panel-title" style="margin-bottom: 10px;">"Steam Setup Required"</div>
+                    <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 14px;">
+                        "To capture game traffic reliably, set this once in Steam: Task Bar Hero -> Properties -> Launch Options. The dashboard will not edit Steam files automatically."
+                    </p>
+                    <textarea readonly rows="4" prop:value=move || steam_launch_options.get()
+                        style="width: 100%; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 13px; margin-bottom: 14px;">
+                    </textarea>
+                    <p style="color: var(--amber); line-height: 1.6; margin-bottom: 16px;">
+                        "After changing Steam Launch Options, restart the game. If Steam was already open and capture does not start, restart Steam once."
+                    </p>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="btn-action" on:click=acknowledge_launch_setup>"I Set This In Steam"</button>
+                    </div>
+                </div>
+            </div>
             <aside class="sidebar">
                 <div class="sidebar-logo">
                     <img class="logo-img" src="logo.png" alt="TaskBarHero"/>

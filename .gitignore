@@ -26,3 +26,9 @@ build/
 Assets/
 # Game assets (shipped separately, not tracked in git)
 src-tauri/Assets/
+
+# Arch packaging outputs
+packaging/arch/pkg/
+packaging/arch/src/
+packaging/arch/*.pkg.tar.*
+packaging/arch/*.src.tar.*

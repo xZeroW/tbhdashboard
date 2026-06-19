@@ -56,45 +56,24 @@ jobs:
       - name: Install Trunk
         run: cargo binstall trunk --no-confirm
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: sidecar/requirements.txt
-
-      - name: Cache Python sidecar binary
+      - name: Cache Rust sidecar binary
         id: sidecar-cache
         uses: actions/cache@v4
         with:
           path: src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}*
-          key: sidecar-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('sidecar/**', 'scripts/build-sidecar.sh') }}
+          key: sidecar-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('rust-sidecar/**', 'scripts/build-sidecar.sh', 'Cargo.lock') }}
 
-      - name: Build Python sidecar
+      - name: Build Rust sidecar
         if: steps.sidecar-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r sidecar/requirements.txt nuitka
-          pushd sidecar
-          python -m nuitka \
-            --mode=onefile \
-            --assume-yes-for-downloads \
-            --output-dir=dist \
-            --output-filename=tbhd-sidecar \
-            --include-package=mitmproxy \
-            --include-package=mitmproxy.tools \
-            --include-data-files=addon.py=addon.py \
-            --nofollow-import-to=tkinter,matplotlib,numpy,pandas \
-            --follow-imports \
-            main.py
-          popd
+          cargo build --release --target ${{ matrix.target }} -p tbhd-sidecar
 
           mkdir -p src-tauri/binaries
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp sidecar/dist/tbhd-sidecar.exe "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}.exe"
+            cp "target/${{ matrix.target }}/release/tbhd-sidecar.exe" "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}.exe"
           else
-            cp sidecar/dist/tbhd-sidecar "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
+            cp "target/${{ matrix.target }}/release/tbhd-sidecar" "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
             chmod +x "src-tauri/binaries/tbhd-sidecar-${{ matrix.target }}"
           fi
 

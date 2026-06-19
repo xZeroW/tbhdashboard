@@ -14,6 +14,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     let (include_steam_launch_options, set_include_steam_launch_options) = signal(false);
     let (steam_launch_options, set_steam_launch_options) = signal(String::new());
     let (launch_game_on_start, set_launch_game_on_start) = signal(false);
+    let (steam_launch_options_prompted, set_steam_launch_options_prompted) = signal(false);
 
     let fetch_catalog = move || {
         spawn_local(async move {
@@ -51,6 +52,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
             set_include_steam_launch_options.set(settings.include_steam_launch_options);
             set_steam_launch_options.set(settings.steam_launch_options);
             set_launch_game_on_start.set(settings.launch_game_on_start);
+            set_steam_launch_options_prompted.set(settings.steam_launch_options_prompted);
         });
     });
 
@@ -65,6 +67,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         include_steam_launch_options: include_steam_launch_options.get(),
         steam_launch_options: steam_launch_options.get(),
         launch_game_on_start: launch_game_on_start.get(),
+        steam_launch_options_prompted: steam_launch_options_prompted.get(),
     };
 
     let save_settings = move || {
@@ -179,7 +182,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
                         />
                         <span class="slider"></span>
                     </label>
-                    <span class="settings-hint">"Include custom Steam launch options when pressing Play"</span>
+                    <span class="settings-hint">"Marks that Steam is configured manually for capture."</span>
                 </div>
 
                 <div class="settings-row column">
@@ -192,7 +195,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
                             save_settings();
                         }
                     />
-                    <span class="settings-hint">"Saved locally and passed to Steam only when enabled."</span>
+                    <span class="settings-hint">"Copy this into the game's Steam Launch Options in Steam."</span>
                 </div>
             </div>
 

@@ -111,7 +111,7 @@ pub fn launch_game_from_settings(settings: &AppSettings) -> LaunchGameResult {
     match launch_steam_app(&settings) {
         Ok(()) => LaunchGameResult {
             ok: true,
-            message: "Launch request sent to Steam".to_string(),
+            message: launch_success_message(),
         },
         Err(err) => LaunchGameResult {
             ok: false,
@@ -120,118 +120,78 @@ pub fn launch_game_from_settings(settings: &AppSettings) -> LaunchGameResult {
     }
 }
 
-fn launch_steam_app(settings: &AppSettings) -> Result<(), String> {
-    let options = settings.steam_launch_options.trim();
-    let args = if settings.include_steam_launch_options && !options.is_empty() {
-        split_launch_options(options)?
-    } else {
-        Vec::new()
-    };
-    open_steam_app(&args)
+fn launch_success_message() -> String {
+    "Launch request sent. Capture requires the Steam Launch Options shown at startup.".to_string()
 }
 
-fn split_launch_options(value: &str) -> Result<Vec<String>, String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    let mut escaped = false;
+fn launch_steam_app(settings: &AppSettings) -> Result<(), String> {
+    open_steam_app(&settings.proxy_url)
+}
 
-    for ch in value.chars() {
-        if escaped {
-            current.push(ch);
-            escaped = false;
-            continue;
-        }
+fn steam_run_url() -> String {
+    format!("steam://run/{STEAM_APP_ID}")
+}
 
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-
-        if let Some(quote_ch) = quote {
-            if ch == quote_ch {
-                quote = None;
-            } else {
-                current.push(ch);
-            }
-            continue;
-        }
-
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            ch if ch.is_whitespace() => {
-                if !current.is_empty() {
-                    args.push(std::mem::take(&mut current));
-                }
-            }
-            _ => current.push(ch),
-        }
+fn apply_proxy_env(command: &mut Command, proxy_url: &str) {
+    let proxy_url = proxy_url.trim();
+    if proxy_url.is_empty() {
+        return;
     }
 
-    if escaped {
-        current.push('\\');
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        command.env(key, proxy_url);
     }
-
-    if quote.is_some() {
-        return Err("Steam launch options have an unclosed quote".to_string());
-    }
-
-    if !current.is_empty() {
-        args.push(current);
-    }
-
-    Ok(args)
 }
 
 #[cfg(target_os = "windows")]
-fn open_steam_app(args: &[String]) -> Result<(), String> {
-    let direct = Command::new("steam")
-        .arg("-applaunch")
-        .arg(STEAM_APP_ID)
-        .args(args)
-        .spawn();
+fn open_steam_app(proxy_url: &str) -> Result<(), String> {
+    let steam_url = steam_run_url();
+    let mut command = Command::new("steam");
+    apply_proxy_env(&mut command, proxy_url);
+    let direct = command.arg("-applaunch").arg(STEAM_APP_ID).spawn();
     if direct.is_ok() {
         return Ok(());
     }
 
-    if args.is_empty() {
-        Command::new("cmd")
-            .args(["/C", "start", "", &format!("steam://run/{STEAM_APP_ID}")])
-            .spawn()
-            .map(|_| ())
-            .map_err(|err| format!("Failed to ask Steam to launch: {err}"))
-    } else {
-        Err("Custom launch options require steam.exe to be available on PATH".to_string())
-    }
+    Command::new("cmd")
+        .args(["/C", "start", "", &steam_url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Failed to ask Steam to launch: {err}"))
 }
 
 #[cfg(target_os = "macos")]
-fn open_steam_app(args: &[String]) -> Result<(), String> {
-    Command::new("open")
+fn open_steam_app(proxy_url: &str) -> Result<(), String> {
+    let mut command = Command::new("open");
+    apply_proxy_env(&mut command, proxy_url);
+    command
         .args(["-a", "Steam", "--args", "-applaunch", STEAM_APP_ID])
-        .args(args)
         .spawn()
         .map(|_| ())
         .map_err(|err| format!("Failed to ask Steam to launch: {err}"))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn open_steam_app(args: &[String]) -> Result<(), String> {
-    match Command::new("steam")
-        .arg("-applaunch")
-        .arg(STEAM_APP_ID)
-        .args(args)
-        .spawn()
-    {
+fn open_steam_app(proxy_url: &str) -> Result<(), String> {
+    let steam_url = steam_run_url();
+    let mut command = Command::new("steam");
+    apply_proxy_env(&mut command, proxy_url);
+    match command.arg("-applaunch").arg(STEAM_APP_ID).spawn() {
         Ok(_) => Ok(()),
-        Err(steam_err) if args.is_empty() => Command::new("xdg-open")
-            .arg(format!("steam://run/{STEAM_APP_ID}"))
+        Err(steam_err) => Command::new("xdg-open")
+            .arg(steam_url)
             .spawn()
             .map(|_| ())
             .map_err(|xdg_err| {
                 format!("Failed to ask Steam to launch: steam: {steam_err}; xdg-open: {xdg_err}")
             }),
-        Err(steam_err) => Err(format!("Failed to run Steam directly: {steam_err}")),
     }
 }
 
