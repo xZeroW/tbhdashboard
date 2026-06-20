@@ -24,7 +24,7 @@
 * ⏱️ Shows unlock times, rewards, item keys, rarity totals, and queue statistics.
 * 🔁 Previews reroll-generated queues after entering Act Boss stages.
 * 🎁 Displays Act Boss chest rewards after opening.
-* 🗺️ Ranks stages by selected item rarity using exported game data.
+* 🗺️ Ranks stages by selected item rarity using downloaded game data.
 * 🛰️ Starts a local Hudsucker MITM proxy and persists state locally.
 * 🛡️ Runs read-only through captured server responses; it does not modify game memory or packets.
 
@@ -47,12 +47,13 @@ Requirements:
 
 * Rust stable
 * Tauri 2 system dependencies for your OS
+* `wasm32-unknown-unknown` Rust target
 * Trunk
-* AssetRipper for exported game data
 
 Install Rust tools if needed:
 
 ```bash
+rustup target add wasm32-unknown-unknown
 cargo install trunk tauri-cli
 ```
 
@@ -106,25 +107,11 @@ tbhdashboard-nethelper.exe stop
 
 ## 🗃️ Game Data Setup
 
-The dashboard needs exported TaskBarHero data for item names, drop odds, and stage farming calculations. Release packages do not include exported `Assets/` by default.
+The dashboard needs TaskBarHero data for item names, drop odds, and stage farming calculations. The app checks the hosted asset manifest from Settings and downloads updates directly when needed.
 
-Download AssetRipper:
+Use Settings -> Catalog -> Check Assets Update to download or refresh game data. On startup, Settings also checks for updates automatically with a short cooldown.
 
-https://github.com/AssetRipper/AssetRipper
-
-Export flow:
-
-```text
-File
-Open Folder
-Select the TaskBarHero game folder
-Export
-Export All Files
-Select the TaskBarHeroDashboard folder
-Export Primary Content
-```
-
-The exported data should contain at least:
+Downloaded data is installed as an `Assets/` folder containing at least:
 
 ```text
 Assets/
@@ -136,13 +123,13 @@ Assets/
     StageInfoData.txt
 ```
 
-The app resolves game data in this order:
+By default, assets are stored next to the running executable. For local development or diagnostics, you can override the asset root with `TBH_ASSETS`:
 
-* The Assets folder selected in Settings.
-* `TBH_ASSETS`, if set.
-* `Assets/` next to the running executable.
+```bash
+TBH_ASSETS=/path/to/Assets cargo tauri dev
+```
 
-After a game patch, re-export with AssetRipper, replace `Assets/TextAsset`, and restart or reload the catalog from Settings.
+After a game patch, use Check Assets Update again. If the hosted manifest URL needs to be changed for development, set `TBH_ASSET_MANIFEST_URL` before starting the app.
 
 ## 🎮 Using The Dashboard
 
@@ -237,7 +224,7 @@ Shows recent captured dashboard events, proxy status changes, and state updates.
 
 ### ⚙️ Settings
 
-Configures refresh interval, log level, proxy URL, Steam launch options, automatic game launch, and exported Assets folder.
+Configures refresh interval, log level, proxy URL, Steam launch options, automatic game launch, and catalog asset updates.
 
 ## 🛠️ Developer Notes
 
@@ -248,7 +235,7 @@ The app is a Tauri 2 desktop application with a Leptos WASM frontend, a Rust bac
 * `src/` contains the Leptos frontend and tab components.
 * `src-tauri/src/models.rs` contains typed app data.
 * `src-tauri/src/state.rs` owns JSON persistence through `StateRepository`.
-* `src-tauri/src/catalog.rs` loads exported game data and calculates drop odds.
+* `src-tauri/src/catalog.rs` loads downloaded game data and calculates drop odds.
 * `src-tauri/src/chests.rs` contains chest domain logic and row projection.
 * `src-tauri/src/capture.rs` parses proxy capture messages and updates state.
 * `src-tauri/src/commands.rs` exposes Tauri command handlers to the frontend.
@@ -259,7 +246,10 @@ The app is a Tauri 2 desktop application with a Leptos WASM frontend, a Rust bac
 Run Rust checks and tests:
 
 ```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+trunk build
 ```
 
 ### 📦 Build Package
