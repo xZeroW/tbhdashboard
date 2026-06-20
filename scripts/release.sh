@@ -29,11 +29,6 @@ fi
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-if ! git diff --cached --quiet; then
-  printf 'Staged changes already exist. Commit or unstage them first.\n' >&2
-  exit 1
-fi
-
 branch=$(git branch --show-current)
 if [[ -z "$branch" ]]; then
   printf 'Not on a branch. Checkout a branch before releasing.\n' >&2

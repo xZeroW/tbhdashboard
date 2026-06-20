@@ -215,8 +215,6 @@ fn verify_zip(bytes: &[u8], manifest: &AssetManifest) -> Result<()> {
         && !expected.is_empty()
     {
         let actual = hex::encode(Sha256::digest(bytes));
-        println!("actual: {actual}");
-        println!("expected: {expected}");
         if !actual.eq_ignore_ascii_case(expected) {
             return Err(anyhow!("asset zip checksum mismatch"));
         }

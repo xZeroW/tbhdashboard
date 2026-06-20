@@ -8,6 +8,9 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"])]
     pub async fn listen(event: &str, handler: &JsValue) -> JsValue;
+
+    #[wasm_bindgen(js_namespace = window, js_name = openPaddleCheckout)]
+    async fn open_paddle_checkout_js(config: JsValue) -> JsValue;
 }
 
 // ---- Types matching Rust Tauri command return types ----
@@ -143,6 +146,7 @@ pub struct AuthUser {
     pub id: String,
     pub username: String,
     pub email: Option<String>,
+    #[serde(default)]
     pub is_admin: bool,
     pub entitlement: Option<EntitlementInfo>,
 }
@@ -153,6 +157,55 @@ pub struct LoginResult {
     pub ok: bool,
     pub message: String,
     pub user: Option<AuthUser>,
+    #[serde(default)]
+    pub status: Option<u16>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutConfig {
+    pub client_token: Option<String>,
+    pub price_id: String,
+    pub environment: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterResult {
+    pub ok: bool,
+    pub message: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub checkout: Option<CheckoutConfig>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivationStatusResult {
+    pub ok: bool,
+    pub message: String,
+    pub active: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InactiveCheckoutResult {
+    pub ok: bool,
+    pub message: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub checkout: Option<CheckoutConfig>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PaddleCheckoutResult {
+    pub opened: bool,
+    pub completed: bool,
+    pub message: Option<String>,
+    pub error: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -256,7 +309,113 @@ pub async fn invoke_login(server_url: &str, username: &str, password: &str) -> L
         ok: false,
         message: "Failed to read login result".to_string(),
         user: None,
+        status: None,
     })
+}
+
+pub async fn invoke_register(
+    server_url: &str,
+    username: &str,
+    email: &str,
+    password: &str,
+) -> RegisterResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "serverUrl": server_url,
+        "username": username,
+        "email": email,
+        "password": password,
+    }))
+    .unwrap();
+    let result = invoke("register", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(RegisterResult {
+        ok: false,
+        message: "Failed to read registration result".to_string(),
+        user_id: None,
+        username: None,
+        email: None,
+        checkout: None,
+    })
+}
+
+pub async fn invoke_get_activation_status(
+    server_url: &str,
+    user_id: &str,
+) -> ActivationStatusResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "serverUrl": server_url,
+        "userId": user_id,
+    }))
+    .unwrap();
+    let result = invoke("get_activation_status", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(ActivationStatusResult {
+        ok: false,
+        message: "Failed to read activation status".to_string(),
+        active: false,
+    })
+}
+
+pub async fn invoke_get_inactive_checkout(
+    server_url: &str,
+    username: &str,
+    password: &str,
+) -> InactiveCheckoutResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "serverUrl": server_url,
+        "username": username,
+        "password": password,
+    }))
+    .unwrap();
+    let result = invoke("get_inactive_checkout", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(InactiveCheckoutResult {
+        ok: false,
+        message: "Failed to retrieve checkout details".to_string(),
+        user_id: None,
+        username: None,
+        email: None,
+        checkout: None,
+    })
+}
+
+pub async fn invoke_open_paddle_checkout(
+    checkout: &CheckoutConfig,
+    email: &str,
+    user_id: &str,
+) -> PaddleCheckoutResult {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PaddleJsConfig {
+        client_token: Option<String>,
+        price_id: String,
+        environment: String,
+        email: String,
+        user_id: String,
+    }
+
+    let config = serde_wasm_bindgen::to_value(&PaddleJsConfig {
+        client_token: checkout.client_token.clone(),
+        price_id: checkout.price_id.clone(),
+        environment: checkout.environment.clone(),
+        email: email.to_string(),
+        user_id: user_id.to_string(),
+    })
+    .unwrap();
+
+    let result = open_paddle_checkout_js(config).await;
+    let mut checkout_result: PaddleCheckoutResult = serde_wasm_bindgen::from_value(result)
+        .unwrap_or(PaddleCheckoutResult {
+            opened: false,
+            completed: false,
+            message: Some("Failed to read Paddle checkout result.".to_string()),
+            error: None,
+        });
+
+    if let Some(error) = checkout_result.error.take() {
+        checkout_result.opened = false;
+        checkout_result.completed = false;
+        checkout_result.message = Some(error);
+    }
+
+    checkout_result
 }
 
 pub async fn invoke_get_current_user() -> Option<AuthUser> {

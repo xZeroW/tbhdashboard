@@ -133,6 +133,35 @@ body { overflow: hidden; height: 100vh; }
     text-align: center;
 }
 
+.login-mode-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+
+.login-mode-toggle button {
+    height: 36px;
+    border: 1px solid var(--border-light);
+    border-radius: 9px;
+    background: var(--bg-input);
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+}
+
+.login-mode-toggle button.active {
+    border-color: rgba(168, 85, 247, 0.55);
+    background: rgba(124, 58, 237, 0.22);
+    color: var(--text);
+}
+
+.login-mode-toggle button:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
 .login-label {
     display: block;
     color: var(--text-dim);

@@ -51,6 +51,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_proxy_status,
             commands::login,
+            commands::register,
+            commands::get_activation_status,
+            commands::get_inactive_checkout,
             commands::get_current_user,
             commands::logout,
             commands::get_settings,

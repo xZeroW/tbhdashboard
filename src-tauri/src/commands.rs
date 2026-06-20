@@ -53,6 +53,7 @@ pub struct AuthUser {
     pub id: String,
     pub username: String,
     pub email: Option<String>,
+    #[serde(default)]
     pub is_admin: bool,
     pub entitlement: Option<EntitlementInfo>,
 }
@@ -64,12 +65,80 @@ struct ServerLoginResponse {
     user: AuthUser,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerRegisterResponse {
+    user_id: String,
+    username: String,
+    email: String,
+    checkout: CheckoutConfig,
+}
+
+#[derive(serde::Deserialize)]
+struct ServerErrorResponse {
+    error: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ServerActivationStatusResponse {
+    active: bool,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutConfig {
+    pub client_token: Option<String>,
+    pub price_id: String,
+    pub environment: String,
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResult {
     pub ok: bool,
     pub message: String,
     pub user: Option<AuthUser>,
+    pub status: Option<u16>,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterResult {
+    pub ok: bool,
+    pub message: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub checkout: Option<CheckoutConfig>,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivationStatusResult {
+    pub ok: bool,
+    pub message: String,
+    pub active: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerCheckoutResponse {
+    user_id: String,
+    username: String,
+    email: String,
+    checkout: CheckoutConfig,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InactiveCheckoutResult {
+    pub ok: bool,
+    pub message: String,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub checkout: Option<CheckoutConfig>,
 }
 
 impl ProxyStatus {
@@ -133,6 +202,7 @@ pub fn login(
             ok: false,
             message: "Enter server URL, username, and password.".to_string(),
             user: None,
+            status: None,
         };
     }
 
@@ -150,18 +220,25 @@ pub fn login(
             ok: false,
             message: "Could not reach the login server.".to_string(),
             user: None,
+            status: None,
         };
     };
 
     if !response.status().is_success() {
+        let status = response.status();
+        let server_message = server_error_message(response);
         return LoginResult {
             ok: false,
-            message: if response.status().as_u16() == 401 {
+            message: if status.as_u16() == 401 {
                 "Invalid username or password.".to_string()
+            } else if status.as_u16() == 403 {
+                "Account is not active yet. If you just paid, wait a few seconds and try again."
+                    .to_string()
             } else {
-                format!("Login failed: HTTP {}", response.status())
+                server_message.unwrap_or_else(|| "Login failed.".to_string())
             },
             user: None,
+            status: Some(status.as_u16()),
         };
     }
 
@@ -171,6 +248,7 @@ pub fn login(
             ok: false,
             message: "Login server returned an invalid response.".to_string(),
             user: None,
+            status: None,
         };
     };
 
@@ -184,11 +262,221 @@ pub fn login(
             ok: true,
             message: "Logged in.".to_string(),
             user: Some(login.user),
+            status: Some(200),
         },
         Err(err) => LoginResult {
             ok: false,
             message: format!("Logged in, but failed to save token: {err}"),
             user: None,
+            status: None,
+        },
+    }
+}
+
+#[tauri::command]
+pub fn register(
+    state: State<'_, ManagedState>,
+    server_url: String,
+    username: String,
+    email: String,
+    password: String,
+) -> RegisterResult {
+    let server_url = server_url.trim().trim_end_matches('/').to_string();
+    if server_url.is_empty()
+        || username.trim().is_empty()
+        || email.trim().is_empty()
+        || password.is_empty()
+    {
+        return RegisterResult {
+            ok: false,
+            message: "Enter server URL, username, email, and password.".to_string(),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    }
+
+    let client = auth_http_client();
+    let response = client
+        .post(format!("{server_url}/auth/register"))
+        .json(&serde_json::json!({
+            "username": username.trim(),
+            "email": email.trim(),
+            "password": password,
+        }))
+        .send();
+
+    let Ok(response) = response else {
+        return RegisterResult {
+            ok: false,
+            message: "Could not reach the registration server.".to_string(),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    };
+
+    if !response.status().is_success() {
+        let server_message = server_error_message(response);
+        return RegisterResult {
+            ok: false,
+            message: server_message.unwrap_or_else(|| "Registration failed.".to_string()),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    }
+
+    let registration = response.json::<ServerRegisterResponse>();
+    let Ok(registration) = registration else {
+        return RegisterResult {
+            ok: false,
+            message: "Registration server returned an invalid response.".to_string(),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    };
+
+    let mut state_data = state.repo().load();
+    state_data.settings.server_url = server_url;
+    state_data.settings.auth_token.clear();
+    state_data.settings = normalize_settings(state_data.settings);
+
+    let save_message = match state.repo().save(&state_data) {
+        Ok(()) => "Account created. Complete checkout to activate it.".to_string(),
+        Err(err) => format!("Account created, but failed to save server URL: {err}"),
+    };
+
+    RegisterResult {
+        ok: true,
+        message: save_message,
+        user_id: Some(registration.user_id),
+        username: Some(registration.username),
+        email: Some(registration.email),
+        checkout: Some(registration.checkout),
+    }
+}
+
+#[tauri::command]
+pub fn get_activation_status(server_url: String, user_id: String) -> ActivationStatusResult {
+    let server_url = server_url.trim().trim_end_matches('/').to_string();
+    if server_url.is_empty() || user_id.trim().is_empty() {
+        return ActivationStatusResult {
+            ok: false,
+            message: "Missing server URL or user ID.".to_string(),
+            active: false,
+        };
+    }
+
+    let response = auth_http_client()
+        .get(format!("{server_url}/auth/activation-status"))
+        .query(&[("userId", user_id.trim())])
+        .send();
+
+    let Ok(response) = response else {
+        return ActivationStatusResult {
+            ok: false,
+            message: "Could not reach the activation server.".to_string(),
+            active: false,
+        };
+    };
+
+    if !response.status().is_success() {
+        let server_message = server_error_message(response);
+        return ActivationStatusResult {
+            ok: false,
+            message: server_message.unwrap_or_else(|| "Activation check failed.".to_string()),
+            active: false,
+        };
+    }
+
+    match response.json::<ServerActivationStatusResponse>() {
+        Ok(status) => ActivationStatusResult {
+            ok: true,
+            message: String::new(),
+            active: status.active,
+        },
+        Err(_) => ActivationStatusResult {
+            ok: false,
+            message: "Activation server returned an invalid response.".to_string(),
+            active: false,
+        },
+    }
+}
+
+#[tauri::command]
+pub fn get_inactive_checkout(
+    _state: State<'_, ManagedState>,
+    server_url: String,
+    username: String,
+    password: String,
+) -> InactiveCheckoutResult {
+    let server_url = server_url.trim().trim_end_matches('/').to_string();
+    if server_url.is_empty() || username.trim().is_empty() || password.is_empty() {
+        return InactiveCheckoutResult {
+            ok: false,
+            message: "Enter server URL, username, and password.".to_string(),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    }
+
+    let client = auth_http_client();
+    let response = client
+        .post(format!("{server_url}/auth/get-checkout"))
+        .json(&serde_json::json!({
+            "username": username.trim(),
+            "password": password,
+        }))
+        .send();
+
+    let Ok(response) = response else {
+        return InactiveCheckoutResult {
+            ok: false,
+            message: "Could not reach the server.".to_string(),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    };
+
+    if !response.status().is_success() {
+        let server_message = server_error_message(response);
+        return InactiveCheckoutResult {
+            ok: false,
+            message: server_message
+                .unwrap_or_else(|| "Could not retrieve checkout details.".to_string()),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
+        };
+    }
+
+    match response.json::<ServerCheckoutResponse>() {
+        Ok(resp) => InactiveCheckoutResult {
+            ok: true,
+            message: "Checkout details retrieved.".to_string(),
+            user_id: Some(resp.user_id),
+            username: Some(resp.username),
+            email: Some(resp.email),
+            checkout: Some(resp.checkout),
+        },
+        Err(_) => InactiveCheckoutResult {
+            ok: false,
+            message: "Server returned invalid checkout details.".to_string(),
+            user_id: None,
+            username: None,
+            email: None,
+            checkout: None,
         },
     }
 }
@@ -234,6 +522,24 @@ fn auth_http_client() -> reqwest::blocking::Client {
         .timeout(Duration::from_secs(10))
         .build()
         .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
+
+fn server_error_message(response: reqwest::blocking::Response) -> Option<String> {
+    response
+        .json::<ServerErrorResponse>()
+        .ok()
+        .and_then(|err| err.error.or(err.message))
+        .filter(|message| !message.trim().is_empty())
+        .map(|message| {
+            let trimmed = message.trim();
+            if let Some(rest) = trimmed.strip_prefix("bad request:") {
+                rest.trim().to_string()
+            } else if let Some(rest) = trimmed.strip_prefix("conflict:") {
+                rest.trim().to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })
 }
 
 fn normalize_settings(mut settings: AppSettings) -> AppSettings {

@@ -7,6 +7,82 @@
         <link data-trunk rel="copy-file" href="public/logo.png" />
         <link data-trunk rel="copy-dir" href="public" />
         <link data-trunk rel="rust" data-wasm-opt="z" />
+        <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+        <script>
+            window.openPaddleCheckout = function (config) {
+                return new Promise(function (resolve) {
+                    function fail(message) {
+                        resolve({
+                            opened: false,
+                            completed: false,
+                            error: message,
+                        });
+                    }
+
+                    try {
+                        if (!window.Paddle) {
+                            fail(
+                                "Paddle is not loaded. Check your network connection.",
+                            );
+                            return;
+                        }
+
+                        if (!config.clientToken) {
+                            fail(
+                                "Paddle is not configured on the server. Contact support.",
+                            );
+                            return;
+                        }
+
+                        var settled = false;
+                        function finish(result) {
+                            if (settled) return;
+                            settled = true;
+                            resolve(result);
+                        }
+
+                        if (config.environment === "sandbox") {
+                            window.Paddle.Environment.set("sandbox");
+                        }
+
+                        window.Paddle.Initialize({
+                            token: config.clientToken,
+                            eventCallback: function (event) {
+                                var name =
+                                    (event && event.name) ||
+                                    (event && event.eventName) ||
+                                    (event && event.type) ||
+                                    "";
+                                if (name === "checkout.completed") {
+                                    finish({
+                                        opened: true,
+                                        completed: true,
+                                        error: null,
+                                    });
+                                } else if (name === "checkout.closed") {
+                                    finish({
+                                        opened: true,
+                                        completed: false,
+                                        error: null,
+                                    });
+                                }
+                            },
+                        });
+
+                        window.Paddle.Checkout.open({
+                            items: [{ priceId: config.priceId, quantity: 1 }],
+                            customer: { email: config.email },
+                            customData: { userId: config.userId },
+                        });
+                    } catch (err) {
+                        fail(
+                            (err && err.message) ||
+                                "Failed to start Paddle checkout.",
+                        );
+                    }
+                });
+            };
+        </script>
     </head>
     <body></body>
 </html>

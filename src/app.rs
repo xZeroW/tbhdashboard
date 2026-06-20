@@ -208,16 +208,25 @@ fn AuthSplash(message: &'static str) -> impl IntoView {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuthMode {
+    SignIn,
+    CreateAccount,
+}
+
 #[component]
 fn LoginScreen<F>(on_login: F) -> impl IntoView
 where
     F: Fn(invoke::AuthUser) + Copy + 'static,
 {
+    let (auth_mode, set_auth_mode) = signal(AuthMode::SignIn);
     let (server_url, set_server_url) = signal("http://127.0.0.1:3000".to_string());
     let (username, set_username) = signal(String::new());
+    let (email, set_email) = signal(String::new());
     let (password, set_password) = signal(String::new());
     let (logging_in, set_logging_in) = signal(false);
     let (message, set_message) = signal(String::new());
+    let (message_is_error, set_message_is_error) = signal(false);
 
     Effect::new(move |_| {
         spawn_local(async move {
@@ -233,17 +242,287 @@ where
 
         set_logging_in.set(true);
         set_message.set(String::new());
+        set_message_is_error.set(false);
+        let mode = auth_mode.get();
         let server = server_url.get();
         let name = username.get();
+        let email_address = email.get();
         let pass = password.get();
 
         spawn_local(async move {
-            let result = invoke::invoke_login(&server, &name, &pass).await;
-            set_logging_in.set(false);
-            set_message.set(result.message.clone());
-            if result.ok {
-                if let Some(user) = result.user {
-                    on_login(user);
+            match mode {
+                AuthMode::SignIn => {
+                    let result = invoke::invoke_login(&server, &name, &pass).await;
+                    if result.ok {
+                        set_logging_in.set(false);
+                        if let Some(user) = result.user {
+                            on_login(user);
+                        }
+                        return;
+                    }
+
+                    if result.status != Some(403) {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        set_message.set(result.message);
+                        return;
+                    }
+
+                    set_message.set("Account is not active. Looking up checkout...".to_string());
+                    let checkout =
+                        invoke::invoke_get_inactive_checkout(&server, &name, &pass).await;
+
+                    if !checkout.ok {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        let msg = if checkout.message.is_empty() {
+                            "Account is not active. If you just paid, wait a few seconds and try again.".to_string()
+                        } else {
+                            checkout.message
+                        };
+                        set_message.set(format!(
+                            "{msg}\n\nIf you have not completed payment, switch to \"Create account\" and register again."
+                        ));
+                        return;
+                    }
+
+                    let (user_id, checkout_email, checkout_cfg, resp_username) = match (
+                        checkout.user_id,
+                        checkout.email,
+                        checkout.checkout,
+                    ) {
+                        (Some(uid), Some(em), Some(co)) => (uid, em, co, checkout.username),
+                        _ => {
+                            set_logging_in.set(false);
+                            set_message_is_error.set(true);
+                            set_message.set("Server returned incomplete account details. Try again or contact support.".to_string());
+                            return;
+                        }
+                    };
+
+                    if let Some(registered_username) = resp_username {
+                        set_username.set(registered_username);
+                    }
+
+                    set_message.set("Opening Paddle checkout...".to_string());
+                    let checkout_result = invoke::invoke_open_paddle_checkout(
+                        &checkout_cfg,
+                        &checkout_email,
+                        &user_id,
+                    )
+                    .await;
+
+                    if !checkout_result.opened {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        set_message.set(
+                            checkout_result
+                                .message
+                                .unwrap_or_else(|| "Failed to open Paddle checkout.".to_string()),
+                        );
+                        return;
+                    }
+
+                    if !checkout_result.completed {
+                        set_logging_in.set(false);
+                        set_password.set(String::new());
+                        set_message_is_error.set(true);
+                        set_message.set(
+                            "Checkout was not completed. You can try again or sign in after payment."
+                                .to_string(),
+                        );
+                        return;
+                    }
+
+                    set_message.set("Verifying payment...".to_string());
+                    for attempt in 0..30 {
+                        let activation =
+                            invoke::invoke_get_activation_status(&server, &user_id).await;
+                        if !activation.ok {
+                            set_logging_in.set(false);
+                            set_password.set(String::new());
+                            set_message_is_error.set(false);
+                            set_message.set("Payment complete. You can now sign in. If login fails, wait a few seconds for payment processing.".to_string());
+                            return;
+                        }
+
+                        if activation.active {
+                            let login = invoke::invoke_login(&server, &name, &pass).await;
+                            if login.ok {
+                                if let Some(user) = login.user {
+                                    set_logging_in.set(false);
+                                    on_login(user);
+                                    return;
+                                }
+                            }
+
+                            if login.status == Some(401) {
+                                set_logging_in.set(false);
+                                set_password.set(String::new());
+                                set_message_is_error.set(true);
+                                set_message.set(
+                                    "Automatic sign-in failed. Sign in manually with your account."
+                                        .to_string(),
+                                );
+                                return;
+                            }
+
+                            if login.status != Some(403) {
+                                set_logging_in.set(false);
+                                set_password.set(String::new());
+                                set_message_is_error.set(true);
+                                set_message.set(format!(
+                                    "Payment verified, but automatic sign-in failed: {}",
+                                    login.message
+                                ));
+                                return;
+                            }
+                        }
+
+                        if attempt < 29 {
+                            gloo_timers::future::TimeoutFuture::new(2_000).await;
+                        }
+                    }
+
+                    set_logging_in.set(false);
+                    set_password.set(String::new());
+                    set_message_is_error.set(false);
+                    set_message.set(
+                        "Payment received. Verification is still processing. Try signing in in a moment."
+                            .to_string(),
+                    );
+                }
+                AuthMode::CreateAccount => {
+                    let result =
+                        invoke::invoke_register(&server, &name, &email_address, &pass).await;
+                    if !result.ok {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        let msg = if result.message.contains("already registered") {
+                            "An account with this username or email already exists. Switch to \"Sign in\" to complete payment."
+                        } else {
+                            &result.message
+                        };
+                        set_message.set(msg.to_string());
+                        return;
+                    }
+
+                    let Some(user_id) = result.user_id else {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        set_message
+                            .set("Registration response did not include a user ID.".to_string());
+                        return;
+                    };
+                    let Some(checkout_email) = result.email else {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        set_message
+                            .set("Registration response did not include an email.".to_string());
+                        return;
+                    };
+                    let Some(checkout) = result.checkout else {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        set_message.set(
+                            "Registration response did not include checkout details.".to_string(),
+                        );
+                        return;
+                    };
+
+                    if let Some(registered_username) = result.username {
+                        set_username.set(registered_username);
+                    }
+
+                    set_message.set("Opening Paddle checkout...".to_string());
+                    let checkout_result =
+                        invoke::invoke_open_paddle_checkout(&checkout, &checkout_email, &user_id)
+                            .await;
+
+                    if !checkout_result.opened {
+                        set_logging_in.set(false);
+                        set_message_is_error.set(true);
+                        set_message.set(
+                            checkout_result
+                                .message
+                                .unwrap_or_else(|| "Failed to open Paddle checkout.".to_string()),
+                        );
+                        return;
+                    }
+
+                    if !checkout_result.completed {
+                        set_logging_in.set(false);
+                        set_auth_mode.set(AuthMode::SignIn);
+                        set_password.set(String::new());
+                        set_message_is_error.set(true);
+                        set_message.set(
+                            "Checkout was not completed. You can try again or sign in after payment."
+                                .to_string(),
+                        );
+                        return;
+                    }
+
+                    set_message.set("Verifying payment...".to_string());
+                    for attempt in 0..30 {
+                        let activation =
+                            invoke::invoke_get_activation_status(&server, &user_id).await;
+                        if !activation.ok {
+                            set_logging_in.set(false);
+                            set_auth_mode.set(AuthMode::SignIn);
+                            set_password.set(String::new());
+                            set_message_is_error.set(false);
+                            set_message.set("Payment complete. You can now sign in. If login fails, wait a few seconds for payment processing.".to_string());
+                            return;
+                        }
+
+                        if activation.active {
+                            let login = invoke::invoke_login(&server, &name, &pass).await;
+                            if login.ok {
+                                if let Some(user) = login.user {
+                                    set_logging_in.set(false);
+                                    on_login(user);
+                                    return;
+                                }
+                            }
+
+                            if login.status == Some(401) {
+                                set_logging_in.set(false);
+                                set_auth_mode.set(AuthMode::SignIn);
+                                set_password.set(String::new());
+                                set_message_is_error.set(true);
+                                set_message.set(
+                                    "Automatic sign-in failed. Sign in manually with your new account."
+                                        .to_string(),
+                                );
+                                return;
+                            }
+
+                            if login.status != Some(403) {
+                                set_logging_in.set(false);
+                                set_auth_mode.set(AuthMode::SignIn);
+                                set_password.set(String::new());
+                                set_message_is_error.set(true);
+                                set_message.set(format!(
+                                    "Payment verified, but automatic sign-in failed: {}",
+                                    login.message
+                                ));
+                                return;
+                            }
+                        }
+
+                        if attempt < 29 {
+                            gloo_timers::future::TimeoutFuture::new(2_000).await;
+                        }
+                    }
+
+                    set_logging_in.set(false);
+                    set_auth_mode.set(AuthMode::SignIn);
+                    set_password.set(String::new());
+                    set_message_is_error.set(false);
+                    set_message.set(
+                        "Payment received. Verification is still processing. Try signing in in a moment."
+                            .to_string(),
+                    );
                 }
             }
         });
@@ -259,16 +538,49 @@ where
                         <div class="login-subtitle">"DASHBOARD"</div>
                     </div>
                 </div>
-                <div class="login-panel-title">"Sign in"</div>
+                <div class="login-mode-toggle">
+                    <button class:active=move || auth_mode.get() == AuthMode::SignIn
+                        disabled=move || logging_in.get()
+                        on:click=move |_| {
+                            set_auth_mode.set(AuthMode::SignIn);
+                            set_message.set(String::new());
+                            set_message_is_error.set(false);
+                        }
+                    >"Sign in"</button>
+                    <button class:active=move || auth_mode.get() == AuthMode::CreateAccount
+                        disabled=move || logging_in.get()
+                        on:click=move |_| {
+                            set_auth_mode.set(AuthMode::CreateAccount);
+                            set_message.set(String::new());
+                            set_message_is_error.set(false);
+                        }
+                    >"Create account"</button>
+                </div>
+                <div class="login-panel-title">
+                    {move || if auth_mode.get() == AuthMode::SignIn { "Sign in" } else { "Create account" }}
+                </div>
+                <Show when=move || auth_mode.get() == AuthMode::CreateAccount>
+                    <div class="login-panel-copy">
+                        "Create an account, then complete Paddle checkout to activate it."
+                    </div>
+                </Show>
                 <label class="login-label">"Username"</label>
                 <input class="login-input" type="text" prop:value=username
                     autocomplete="username"
                     on:input=move |ev| set_username.set(event_target_value(&ev))
                 />
 
+                <Show when=move || auth_mode.get() == AuthMode::CreateAccount>
+                    <label class="login-label">"Email"</label>
+                    <input class="login-input" type="email" prop:value=email
+                        autocomplete="email"
+                        on:input=move |ev| set_email.set(event_target_value(&ev))
+                    />
+                </Show>
+
                 <label class="login-label">"Password"</label>
                 <input class="login-input" type="password" prop:value=password
-                    autocomplete="current-password"
+                    autocomplete=move || if auth_mode.get() == AuthMode::SignIn { "current-password" } else { "new-password" }
                     on:input=move |ev| set_password.set(event_target_value(&ev))
                     on:keydown=move |ev| {
                         if ev.key() == "Enter" {
@@ -278,10 +590,18 @@ where
                 />
 
                 <button class="login-button" disabled=move || logging_in.get() on:click=move |_| submit()>
-                    {move || if logging_in.get() { "Signing in..." } else { "Login" }}
+                    {move || match (auth_mode.get(), logging_in.get()) {
+                        (AuthMode::SignIn, true) => "Signing in...",
+                        (AuthMode::SignIn, false) => "Login",
+                        (AuthMode::CreateAccount, true) => "Creating account...",
+                        (AuthMode::CreateAccount, false) => "Create account",
+                    }}
                 </button>
 
-                <div class="login-message" class:error=move || !message.get().is_empty()>
+                <div class="login-message"
+                    class:error=move || message_is_error.get() && !message.get().is_empty()
+                    class:muted=move || !message_is_error.get()
+                >
                     {message}
                 </div>
             </div>
