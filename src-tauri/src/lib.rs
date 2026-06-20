@@ -1,3 +1,4 @@
+mod assets;
 mod capture;
 mod catalog;
 mod chests;
@@ -5,6 +6,7 @@ mod commands;
 mod config;
 mod models;
 mod nethelper;
+mod observations;
 mod proxy;
 mod state;
 mod utils;
@@ -48,6 +50,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_proxy_status,
+            commands::login,
+            commands::get_current_user,
+            commands::logout,
             commands::get_settings,
             commands::set_settings,
             commands::launch_game,
@@ -65,6 +70,9 @@ pub fn run() {
             commands::get_assets_path,
             commands::set_assets_path,
             commands::get_assets_root,
+            commands::get_asset_update_status,
+            commands::download_latest_assets,
+            commands::upload_claimable_reward_observations,
             commands::browse_assets_folder,
         ])
         .run(tauri::generate_context!())

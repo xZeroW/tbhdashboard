@@ -23,6 +23,22 @@ pub fn assets_root() -> PathBuf {
         .join("Assets")
 }
 
+pub fn downloaded_assets_base_dir() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("tbhdashboard")
+        .join("downloaded-assets")
+}
+
+pub fn default_asset_manifest_url() -> String {
+    std::env::var("TBH_ASSET_MANIFEST_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:3000/assets/manifest".to_string())
+}
+
+pub fn default_server_url() -> String {
+    std::env::var("TBH_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string())
+}
+
 pub const REFRESH_SECONDS: f64 = 0.5;
 
 pub fn box_names() -> HashMap<i64, &'static str> {

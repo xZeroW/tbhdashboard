@@ -2,16 +2,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tauri::Manager;
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
+use crate::assets::{AssetDownloadResult, AssetUpdateStatus};
 use crate::catalog::StaticCatalog;
 use crate::chests;
 use crate::config;
 use crate::models::*;
 use crate::nethelper;
+use crate::observations::ObservationUploadResult;
 use crate::state::StateRepository;
 
 const STEAM_APP_ID: &str = "3678970";
@@ -36,6 +39,39 @@ pub struct LaunchGameResult {
     pub message: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EntitlementInfo {
+    pub tier: String,
+    pub source: String,
+    pub expires_at: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthUser {
+    pub id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub is_admin: bool,
+    pub entitlement: Option<EntitlementInfo>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerLoginResponse {
+    token: String,
+    user: AuthUser,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginResult {
+    pub ok: bool,
+    pub message: String,
+    pub user: Option<AuthUser>,
+}
+
 impl ProxyStatus {
     pub fn starting() -> Self {
         Self {
@@ -49,11 +85,9 @@ impl ProxyStatus {
 impl ManagedState {
     pub fn new() -> Self {
         let repo = StateRepository::new(config::state_path());
-        let saved = repo.load();
-        let root = saved.assets_path.as_deref().map(std::path::PathBuf::from);
         Self {
             repo,
-            catalog: Mutex::new(StaticCatalog::new(root)),
+            catalog: Mutex::new(StaticCatalog::new(None)),
             proxy_status: Arc::new(Mutex::new(ProxyStatus::starting())),
         }
     }
@@ -86,6 +120,122 @@ pub fn set_settings(state: State<'_, ManagedState>, settings: AppSettings) -> bo
     state.repo().save(&state_data).is_ok()
 }
 
+#[tauri::command]
+pub fn login(
+    state: State<'_, ManagedState>,
+    server_url: String,
+    username: String,
+    password: String,
+) -> LoginResult {
+    let server_url = server_url.trim().trim_end_matches('/').to_string();
+    if server_url.is_empty() || username.trim().is_empty() || password.is_empty() {
+        return LoginResult {
+            ok: false,
+            message: "Enter server URL, username, and password.".to_string(),
+            user: None,
+        };
+    }
+
+    let client = auth_http_client();
+    let response = client
+        .post(format!("{server_url}/auth/login"))
+        .json(&serde_json::json!({
+            "username": username.trim(),
+            "password": password,
+        }))
+        .send();
+
+    let Ok(response) = response else {
+        return LoginResult {
+            ok: false,
+            message: "Could not reach the login server.".to_string(),
+            user: None,
+        };
+    };
+
+    if !response.status().is_success() {
+        return LoginResult {
+            ok: false,
+            message: if response.status().as_u16() == 401 {
+                "Invalid username or password.".to_string()
+            } else {
+                format!("Login failed: HTTP {}", response.status())
+            },
+            user: None,
+        };
+    }
+
+    let login = response.json::<ServerLoginResponse>();
+    let Ok(login) = login else {
+        return LoginResult {
+            ok: false,
+            message: "Login server returned an invalid response.".to_string(),
+            user: None,
+        };
+    };
+
+    let mut state_data = state.repo().load();
+    state_data.settings.server_url = server_url;
+    state_data.settings.auth_token = login.token;
+    state_data.settings = normalize_settings(state_data.settings);
+
+    match state.repo().save(&state_data) {
+        Ok(()) => LoginResult {
+            ok: true,
+            message: "Logged in.".to_string(),
+            user: Some(login.user),
+        },
+        Err(err) => LoginResult {
+            ok: false,
+            message: format!("Logged in, but failed to save token: {err}"),
+            user: None,
+        },
+    }
+}
+
+#[tauri::command]
+pub fn get_current_user(state: State<'_, ManagedState>) -> Option<AuthUser> {
+    let settings = normalize_settings(state.repo().load().settings);
+    let server_url = settings.server_url.trim().trim_end_matches('/').to_string();
+    let auth_token = settings.auth_token.trim().to_string();
+    if server_url.is_empty() || auth_token.is_empty() {
+        return None;
+    }
+
+    auth_http_client()
+        .get(format!("{server_url}/me"))
+        .bearer_auth(auth_token)
+        .send()
+        .ok()
+        .filter(|response| response.status().is_success())
+        .and_then(|response| response.json::<AuthUser>().ok())
+}
+
+#[tauri::command]
+pub fn logout(state: State<'_, ManagedState>) -> bool {
+    let mut state_data = state.repo().load();
+    let settings = normalize_settings(state_data.settings.clone());
+    let server_url = settings.server_url.trim().trim_end_matches('/').to_string();
+    let auth_token = settings.auth_token.trim().to_string();
+
+    if !server_url.is_empty() && !auth_token.is_empty() {
+        let _ = auth_http_client()
+            .post(format!("{server_url}/auth/logout"))
+            .bearer_auth(&auth_token)
+            .send();
+    }
+
+    state_data.settings.auth_token.clear();
+    state.repo().save(&state_data).is_ok()
+}
+
+fn auth_http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
+
 fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     let linux_default = "HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%";
     let windows_default = "cmd /c \"set HTTP_PROXY=http://127.0.0.1:8080 && set HTTPS_PROXY=http://127.0.0.1:8080 && %command%\"";
@@ -97,6 +247,14 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
         || (!cfg!(target_os = "windows") && current == windows_default)
     {
         settings.steam_launch_options = current_default;
+    }
+
+    if settings.asset_manifest_url.trim().is_empty() {
+        settings.asset_manifest_url = config::default_asset_manifest_url();
+    }
+
+    if settings.server_url.trim().is_empty() {
+        settings.server_url = config::default_server_url();
     }
 
     settings
@@ -341,9 +499,7 @@ pub fn get_rarity_order() -> Vec<String> {
 #[tauri::command]
 pub fn reload_catalog(state: State<'_, ManagedState>) -> bool {
     let mut catalog = state.catalog.lock().unwrap();
-    let saved = state.repo().load();
-    let root = saved.assets_path.as_deref().map(std::path::PathBuf::from);
-    *catalog = StaticCatalog::new(root);
+    *catalog = StaticCatalog::new(None);
     catalog.valid
 }
 
@@ -358,6 +514,7 @@ pub fn get_assets_path(state: State<'_, ManagedState>) -> Option<String> {
 pub fn set_assets_path(state: State<'_, ManagedState>, path: String) -> bool {
     let mut state_data = state.repo().load();
     state_data.assets_path = Some(path);
+    state_data.assets_version = None;
     let _ = state.repo().save(&state_data);
 
     let root = state_data
@@ -371,11 +528,42 @@ pub fn set_assets_path(state: State<'_, ManagedState>, path: String) -> bool {
 
 #[tauri::command]
 pub fn get_assets_root(state: State<'_, ManagedState>) -> String {
-    let saved = state.repo().load();
-    match saved.assets_path {
-        Some(ref p) => p.clone(),
-        None => config::assets_root().to_string_lossy().into_owned(),
+    let _ = state;
+    config::assets_root().to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+pub async fn get_asset_update_status(
+    state: State<'_, ManagedState>,
+) -> Result<AssetUpdateStatus, String> {
+    let repo = StateRepository::new(state.repo().path.clone());
+    Ok(crate::assets::check_update(&repo).await)
+}
+
+#[tauri::command]
+pub async fn download_latest_assets(
+    state: State<'_, ManagedState>,
+) -> Result<AssetDownloadResult, String> {
+    let repo = StateRepository::new(state.repo().path.clone());
+    let result = crate::assets::download_latest(&repo).await;
+
+    if result.ok {
+        let mut catalog = state.catalog.lock().unwrap();
+        *catalog = StaticCatalog::new(None);
     }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn upload_claimable_reward_observations(
+    state: State<'_, ManagedState>,
+) -> Result<ObservationUploadResult, String> {
+    let repo = StateRepository::new(state.repo().path.clone());
+    let catalog = state.catalog.lock().unwrap();
+    Ok(crate::observations::upload_claimable_rewards(
+        &repo, &catalog,
+    ))
 }
 
 #[tauri::command]

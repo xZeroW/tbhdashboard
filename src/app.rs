@@ -133,26 +133,22 @@ pub fn reward_emoji(rarity: &str) -> &'static str {
 pub enum Tab {
     ChestQueue,
     RerollPreview,
-    BossDrop,
     FarmRanking,
-    Events,
     Settings,
 }
 
-const TAB_DEFS: &[(Tab, &str, &str)] = &[
-    (Tab::ChestQueue, "Queue", "\u{1f4e6}"),
-    (Tab::RerollPreview, "Reroll", "\u{1f3b2}"),
-    (Tab::BossDrop, "Boss", "\u{1f479}"),
-    (Tab::FarmRanking, "Farming", "\u{1f33e}"),
-    (Tab::Events, "Events", "\u{1f4dc}"),
-    (Tab::Settings, "Settings", "\u{1f527}"),
+const TAB_DEFS: &[(Tab, &str, &str, bool)] = &[
+    (Tab::ChestQueue, "Queue", "\u{1f4e6}", false),
+    (Tab::RerollPreview, "Reroll", "\u{1f3b2}", true),
+    (Tab::FarmRanking, "Farming", "\u{1f33e}", false),
+    (Tab::Settings, "Settings", "\u{1f527}", false),
 ];
 
 fn tab_title(tab: &Tab) -> &'static str {
     TAB_DEFS
         .iter()
-        .find(|(t, _, _)| *t == *tab)
-        .map(|(_, l, _)| *l)
+        .find(|(t, _, _, _)| *t == *tab)
+        .map(|(_, l, _, _)| *l)
         .unwrap_or("")
 }
 
@@ -162,9 +158,144 @@ fn cs(classes: &str) -> String {
 
 #[component]
 pub fn App() -> impl IntoView {
+    let (checking_session, set_checking_session) = signal(true);
+    let (current_user, set_current_user) = signal(None::<invoke::AuthUser>);
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            set_current_user.set(invoke::invoke_get_current_user().await);
+            set_checking_session.set(false);
+        });
+    });
+
+    let on_login = move |user: invoke::AuthUser| {
+        set_current_user.set(Some(user));
+    };
+
+    let on_logout = move |_| {
+        spawn_local(async move {
+            let _ = invoke::invoke_logout().await;
+            set_current_user.set(None);
+        });
+    };
+
+    view! {
+        <Show
+            when=move || !checking_session.get()
+            fallback=move || view! { <AuthSplash message="Checking session..."/> }
+        >
+            <Show
+                when=move || current_user.get().is_some()
+                fallback=move || view! { <LoginScreen on_login/> }
+            >
+                <Dashboard user=Signal::derive(move || current_user.get().unwrap_or_default()) on_logout/>
+            </Show>
+        </Show>
+    }
+}
+
+#[component]
+fn AuthSplash(message: &'static str) -> impl IntoView {
+    view! {
+        <div class="login-root">
+            <div class="login-card compact">
+                <img class="login-logo" src="logo.png" alt="TaskBarHero"/>
+                <div class="login-title">"TASKBAR HERO"</div>
+                <div class="login-subtitle">"DASHBOARD"</div>
+                <div class="login-message muted">{message}</div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn LoginScreen<F>(on_login: F) -> impl IntoView
+where
+    F: Fn(invoke::AuthUser) + Copy + 'static,
+{
+    let (server_url, set_server_url) = signal("http://127.0.0.1:3000".to_string());
+    let (username, set_username) = signal(String::new());
+    let (password, set_password) = signal(String::new());
+    let (logging_in, set_logging_in) = signal(false);
+    let (message, set_message) = signal(String::new());
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            let settings = invoke::invoke_get_settings().await;
+            set_server_url.set(settings.server_url);
+        });
+    });
+
+    let submit = move || {
+        if logging_in.get() {
+            return;
+        }
+
+        set_logging_in.set(true);
+        set_message.set(String::new());
+        let server = server_url.get();
+        let name = username.get();
+        let pass = password.get();
+
+        spawn_local(async move {
+            let result = invoke::invoke_login(&server, &name, &pass).await;
+            set_logging_in.set(false);
+            set_message.set(result.message.clone());
+            if result.ok {
+                if let Some(user) = result.user {
+                    on_login(user);
+                }
+            }
+        });
+    };
+
+    view! {
+        <div class="login-root">
+            <div class="login-card">
+                <div class="login-brand">
+                    <img class="login-logo" src="logo.png" alt="TaskBarHero"/>
+                    <div>
+                        <div class="login-title">"TASKBAR HERO"</div>
+                        <div class="login-subtitle">"DASHBOARD"</div>
+                    </div>
+                </div>
+                <div class="login-panel-title">"Sign in"</div>
+                <label class="login-label">"Username"</label>
+                <input class="login-input" type="text" prop:value=username
+                    autocomplete="username"
+                    on:input=move |ev| set_username.set(event_target_value(&ev))
+                />
+
+                <label class="login-label">"Password"</label>
+                <input class="login-input" type="password" prop:value=password
+                    autocomplete="current-password"
+                    on:input=move |ev| set_password.set(event_target_value(&ev))
+                    on:keydown=move |ev| {
+                        if ev.key() == "Enter" {
+                            submit();
+                        }
+                    }
+                />
+
+                <button class="login-button" disabled=move || logging_in.get() on:click=move |_| submit()>
+                    {move || if logging_in.get() { "Signing in..." } else { "Login" }}
+                </button>
+
+                <div class="login-message" class:error=move || !message.get().is_empty()>
+                    {message}
+                </div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn Dashboard(
+    user: Signal<invoke::AuthUser>,
+    on_logout: impl Fn(()) + Copy + 'static,
+) -> impl IntoView {
     let (active_tab, set_active_tab) = signal(Tab::ChestQueue);
     let (tick, set_tick) = signal(0u32);
-    let (proxy_status, set_proxy_status) = signal(None::<invoke::ProxyStatus>);
     let (chest_rows, set_chest_rows) = signal(Vec::<invoke::ChestRow>::new());
     let (launching_game, set_launching_game) = signal(false);
     let (launch_status, set_launch_status) = signal(None::<invoke::LaunchGameResult>);
@@ -193,14 +324,12 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| {
         tick.get();
         spawn_local(async move {
-            set_proxy_status.set(invoke::invoke_get_proxy_status().await);
-        });
-    });
-
-    Effect::new(move |_| {
-        tick.get();
-        spawn_local(async move {
-            set_chest_rows.set(invoke::invoke_get_chest_rows(false).await);
+            let rows = invoke::invoke_get_chest_rows(false).await;
+            let has_claimable = rows.iter().any(|row| row.remaining <= 0.0 && !row.is_get);
+            set_chest_rows.set(rows);
+            if has_claimable {
+                let _ = invoke::invoke_upload_claimable_reward_observations().await;
+            }
         });
     });
 
@@ -312,16 +441,23 @@ pub fn App() -> impl IntoView {
                     <div class="logo-subtitle">"\u{2014} DASHBOARD \u{2014}"</div>
                 </div>
                 <nav>
-                    {TAB_DEFS.iter().map(|(tab, label, icon)| {
+                    {TAB_DEFS.iter().map(|(tab, label, icon, disabled)| {
                         let t1 = tab.clone();
                         let t2 = tab.clone();
                         let l = label.to_string();
                         let ic = icon.to_string();
+                        let is_disabled = *disabled;
                         let is_active = move || active_tab.get() == t1;
                         view! {
                             <button
                                 class:active=is_active
-                                on:click=move |_| set_active_tab.set(t2.clone())
+                                disabled=is_disabled
+                                title=if is_disabled { "Coming soon" } else { "" }
+                                on:click=move |_| {
+                                    if !is_disabled {
+                                        set_active_tab.set(t2.clone());
+                                    }
+                                }
                             >
                                 <span class="nav-icon">{ic}</span>
                                 {l}
@@ -335,18 +471,6 @@ pub fn App() -> impl IntoView {
 
             <div class="main-area">
                 <div class="header-bar">
-                    <div class="header-status">
-                        <span class="header-label">"Proxy:"</span>
-                        <span class="status-dot" class:green=move || proxy_status.get().map(|s| s.running).unwrap_or(false) class:amber=move || proxy_status.get().map(|s| s.state == "starting").unwrap_or(true) class:red=move || proxy_status.get().map(|s| !s.running && s.state != "starting").unwrap_or(false)></span>
-                        <span class="header-val" style:color=move || {
-                            match proxy_status.get() {
-                                Some(s) if s.running => "var(--green)",
-                                Some(s) if s.state == "starting" => "var(--amber)",
-                                Some(_) => "var(--red)",
-                                None => "var(--amber)",
-                            }
-                        }>{move || proxy_status.get().map(|s| s.message).unwrap_or_else(|| "Starting".to_string())}</span>
-                    </div>
                     <div class="header-status">
                         <span class="header-label">"Game Data:"</span>
                         <span class="header-val">"OK"</span>
@@ -365,8 +489,13 @@ pub fn App() -> impl IntoView {
                             }
                         }>{move || launch_status.get().map(|result| result.message).unwrap_or_default()}</span>
                     </div>
+                    <div class="header-status">
+                        <span class="header-label">"User:"</span>
+                        <span class="header-val">{move || user.get().username}</span>
+                    </div>
                     <div class="header-icon disabled" title="Auto-refresh is enabled" style="font-size: 24px;">"\u{21bb}"</div>
                     <div class="header-icon" title="Settings" style="cursor: pointer;" on:click=move |_| set_active_tab.set(Tab::Settings)>"\u{1f527}"</div>
+                    <button class="header-icon logout-button" title="Logout" on:click=move |_| on_logout(())>"\u{23fb}"</button>
                     <button class="header-icon play-button" title="Run Game" disabled=move || launching_game.get() on:click=move |_| {
                         if launching_game.get() {
                             return;
@@ -433,14 +562,8 @@ pub fn App() -> impl IntoView {
                     <div style:display={move || if active_tab.get() == Tab::RerollPreview { "block" } else { "none" }}>
                         <components::reroll::RerollPreview tick/>
                     </div>
-                    <div style:display={move || if active_tab.get() == Tab::BossDrop { "block" } else { "none" }}>
-                        <components::boss_drop::BossDrop tick/>
-                    </div>
                     <div style:display={move || if active_tab.get() == Tab::FarmRanking { "block" } else { "none" }}>
                         <components::farm_ranking::FarmRanking tick/>
-                    </div>
-                    <div style:display={move || if active_tab.get() == Tab::Events { "block" } else { "none" }}>
-                        <components::events::EventLog tick/>
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::Settings { "block" } else { "none" }}>
                         <components::settings::Settings tick/>

@@ -158,6 +158,16 @@ pub struct AppSettings {
     pub launch_game_on_start: bool,
     #[serde(default)]
     pub steam_launch_options_prompted: bool,
+    #[serde(default = "crate::config::default_asset_manifest_url")]
+    pub asset_manifest_url: String,
+    #[serde(default = "crate::config::default_server_url")]
+    pub server_url: String,
+    #[serde(default)]
+    pub auth_token: String,
+    #[serde(default)]
+    pub steam_id: String,
+    #[serde(default)]
+    pub share_claimable_rewards: bool,
 }
 
 impl Default for AppSettings {
@@ -170,6 +180,11 @@ impl Default for AppSettings {
             steam_launch_options: default_steam_launch_options(),
             launch_game_on_start: false,
             steam_launch_options_prompted: false,
+            asset_manifest_url: crate::config::default_asset_manifest_url(),
+            server_url: crate::config::default_server_url(),
+            auth_token: String::new(),
+            steam_id: String::new(),
+            share_claimable_rewards: false,
         }
     }
 }
@@ -214,6 +229,14 @@ pub struct AppState {
     pub last_snapshot: Option<SnapshotInfo>,
     #[serde(rename = "assets_path", skip_serializing_if = "Option::is_none")]
     pub assets_path: Option<String>,
+    #[serde(
+        rename = "assets_version",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub assets_version: Option<String>,
+    #[serde(default)]
+    pub uploaded_claimable_observation_keys: Vec<String>,
     #[serde(default)]
     pub settings: AppSettings,
 }

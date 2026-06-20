@@ -31,25 +31,6 @@ pub struct ChestRow {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct AddedItem {
-    pub at: String,
-    #[serde(rename = "itemId")]
-    pub item_id: Option<i64>,
-    #[serde(rename = "itemKey")]
-    pub item_key: String,
-    pub count: i32,
-    pub rarity: String,
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct AddedItemsSnapshot {
-    pub at: String,
-    pub source: String,
-    pub items: Vec<AddedItem>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProcessBoxCreatedItem {
     #[serde(rename = "itemId")]
     pub item_id: Option<i64>,
@@ -80,24 +61,11 @@ pub struct FarmRow {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct StateEvent {
-    pub at: String,
-    pub text: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CatalogStatus {
     pub valid: bool,
     pub items_count: usize,
     pub stages_count: usize,
     pub display_names_count: usize,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ProxyStatus {
-    pub running: bool,
-    pub state: String,
-    pub message: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -109,12 +77,82 @@ pub struct AppSettings {
     pub steam_launch_options: String,
     pub launch_game_on_start: bool,
     pub steam_launch_options_prompted: bool,
+    pub asset_manifest_url: String,
+    pub server_url: String,
+    pub auth_token: String,
+    pub steam_id: String,
+    pub share_claimable_rewards: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetManifest {
+    pub version: String,
+    pub url: String,
+    pub sha256: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetUpdateStatus {
+    pub ok: bool,
+    pub message: String,
+    pub current_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub manifest: Option<AssetManifest>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDownloadResult {
+    pub ok: bool,
+    pub message: String,
+    pub version: Option<String>,
+    pub assets_path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservationUploadResult {
+    pub ok: bool,
+    pub uploaded: usize,
+    pub skipped: usize,
+    pub message: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LaunchGameResult {
     pub ok: bool,
     pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntitlementInfo {
+    pub tier: String,
+    pub source: String,
+    pub expires_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthUser {
+    pub id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub is_admin: bool,
+    pub entitlement: Option<EntitlementInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginResult {
+    pub ok: bool,
+    pub message: String,
+    pub user: Option<AuthUser>,
 }
 
 impl Default for AppSettings {
@@ -127,6 +165,11 @@ impl Default for AppSettings {
             steam_launch_options: String::new(),
             launch_game_on_start: false,
             steam_launch_options_prompted: false,
+            asset_manifest_url: "http://127.0.0.1:3000/assets/manifest".to_string(),
+            server_url: "http://127.0.0.1:3000".to_string(),
+            auth_token: String::new(),
+            steam_id: String::new(),
+            share_claimable_rewards: false,
         }
     }
 }
@@ -156,12 +199,6 @@ pub async fn invoke_mark_opened(key: &str) {
     invoke("mark_opened", args).await;
 }
 
-pub async fn invoke_get_last_added() -> Option<AddedItemsSnapshot> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("get_last_added", args).await;
-    serde_wasm_bindgen::from_value(result).ok()
-}
-
 pub async fn invoke_get_last_processbox() -> Option<ProcessBoxInfo> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("get_last_processbox", args).await;
@@ -189,12 +226,6 @@ pub async fn invoke_get_farm_ranking(
     serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
 
-pub async fn invoke_get_events() -> Vec<StateEvent> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("get_events", args).await;
-    serde_wasm_bindgen::from_value(result).unwrap_or_default()
-}
-
 pub async fn invoke_get_catalog_status() -> Option<CatalogStatus> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("get_catalog_status", args).await;
@@ -207,16 +238,37 @@ pub async fn invoke_get_rarity_order() -> Vec<String> {
     serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
 
-pub async fn invoke_get_proxy_status() -> Option<ProxyStatus> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("get_proxy_status", args).await;
-    serde_wasm_bindgen::from_value(result).ok()
-}
-
 pub async fn invoke_get_settings() -> AppSettings {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("get_settings", args).await;
     serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_login(server_url: &str, username: &str, password: &str) -> LoginResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "serverUrl": server_url,
+        "username": username,
+        "password": password,
+    }))
+    .unwrap();
+    let result = invoke("login", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(LoginResult {
+        ok: false,
+        message: "Failed to read login result".to_string(),
+        user: None,
+    })
+}
+
+pub async fn invoke_get_current_user() -> Option<AuthUser> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_current_user", args).await;
+    serde_wasm_bindgen::from_value(result).ok().flatten()
+}
+
+pub async fn invoke_logout() -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("logout", args).await;
+    result.as_bool().unwrap_or(false)
 }
 
 pub async fn invoke_set_settings(settings: AppSettings) -> bool {
@@ -237,29 +289,30 @@ pub async fn invoke_launch_game() -> LaunchGameResult {
     })
 }
 
-pub async fn invoke_reload_catalog() -> bool {
+pub async fn invoke_get_asset_update_status() -> Option<AssetUpdateStatus> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("reload_catalog", args).await;
-    result.as_bool().unwrap_or(false)
+    let result = invoke("get_asset_update_status", args).await;
+    serde_wasm_bindgen::from_value(result).ok()
 }
 
-pub async fn invoke_set_assets_path(path: &str) -> bool {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-        "path": path
-    }))
-    .unwrap();
-    let result = invoke("set_assets_path", args).await;
-    result.as_bool().unwrap_or(false)
+pub async fn invoke_download_latest_assets() -> AssetDownloadResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("download_latest_assets", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(AssetDownloadResult {
+        ok: false,
+        message: "Failed to download assets".to_string(),
+        version: None,
+        assets_path: None,
+    })
 }
 
-pub async fn invoke_get_assets_root() -> String {
+pub async fn invoke_upload_claimable_reward_observations() -> ObservationUploadResult {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("get_assets_root", args).await;
-    result.as_string().unwrap_or_default()
-}
-
-pub async fn invoke_browse_assets_folder() -> Option<String> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("browse_assets_folder", args).await;
-    result.as_string()
+    let result = invoke("upload_claimable_reward_observations", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(ObservationUploadResult {
+        ok: false,
+        uploaded: 0,
+        skipped: 0,
+        message: "Failed to upload observations".to_string(),
+    })
 }

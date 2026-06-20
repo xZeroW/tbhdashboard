@@ -2,13 +2,23 @@ use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+const ASSET_CHECK_COOLDOWN_SECONDS: u32 = 10 * 60;
+
 #[component]
 pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     let (catalog, set_catalog) = signal(None::<invoke::CatalogStatus>);
-    let (proxy_status, set_proxy_status) = signal(None::<invoke::ProxyStatus>);
-    let (assets_root, set_assets_root) = signal(String::new());
-    let (saving, set_saving) = signal(false);
+    let (downloading_assets, set_downloading_assets) = signal(false);
+    let (checking_assets, set_checking_assets) = signal(false);
+    let (asset_check_cooldown, set_asset_check_cooldown) = signal(0u32);
+    let (asset_status, set_asset_status) = signal(None::<invoke::AssetUpdateStatus>);
+    let (asset_message, set_asset_message) = signal(String::new());
     let (proxy_url, set_proxy_url) = signal("http://127.0.0.1:8080".to_string());
+    let (asset_manifest_url, set_asset_manifest_url) =
+        signal("http://127.0.0.1:3000/assets/manifest".to_string());
+    let (server_url, set_server_url) = signal("http://127.0.0.1:3000".to_string());
+    let (auth_token, set_auth_token) = signal(String::new());
+    let (steam_id, set_steam_id) = signal(String::new());
+    let (share_claimable_rewards, set_share_claimable_rewards) = signal(false);
     let (refresh_ms, set_refresh_ms) = signal("500".to_string());
     let (log_level, set_log_level) = signal("info".to_string());
     let (include_steam_launch_options, set_include_steam_launch_options) = signal(false);
@@ -23,24 +33,51 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         });
     };
 
-    let fetch_assets_root = move || {
-        spawn_local(async move {
-            let root = invoke::invoke_get_assets_root().await;
-            set_assets_root.set(root);
-        });
-    };
+    let fetch_asset_status = move || {
+        if checking_assets.get_untracked() || asset_check_cooldown.get_untracked() > 0 {
+            return;
+        }
 
-    let fetch_proxy_status = move || {
+        set_checking_assets.set(true);
         spawn_local(async move {
-            set_proxy_status.set(invoke::invoke_get_proxy_status().await);
+            let status = invoke::invoke_get_asset_update_status().await;
+            if let Some(status) = status.clone() {
+                set_asset_message.set(status.message.clone());
+                if status.update_available {
+                    set_downloading_assets.set(true);
+                    set_asset_message.set("Update found. Downloading assets...".to_string());
+                    let result = invoke::invoke_download_latest_assets().await;
+                    set_asset_message.set(result.message.clone());
+                    if result.ok {
+                        set_catalog.set(invoke::invoke_get_catalog_status().await);
+                        set_asset_status.set(invoke::invoke_get_asset_update_status().await);
+                    }
+                    set_downloading_assets.set(false);
+                    set_checking_assets.set(false);
+                    set_asset_check_cooldown.set(ASSET_CHECK_COOLDOWN_SECONDS);
+                    return;
+                }
+            }
+            set_asset_status.set(status);
+            set_checking_assets.set(false);
+            set_asset_check_cooldown.set(ASSET_CHECK_COOLDOWN_SECONDS);
         });
     };
 
     Effect::new(move |_| {
+        spawn_local(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(1000).await;
+                set_asset_check_cooldown.update(|seconds| {
+                    *seconds = seconds.saturating_sub(1);
+                });
+            }
+        });
+    });
+
+    Effect::new(move |_| {
         tick.get();
         fetch_catalog();
-        fetch_assets_root();
-        fetch_proxy_status();
     });
 
     Effect::new(move |_| {
@@ -49,12 +86,35 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
             set_refresh_ms.set(settings.refresh_ms.to_string());
             set_log_level.set(settings.log_level);
             set_proxy_url.set(settings.proxy_url);
+            set_asset_manifest_url.set(settings.asset_manifest_url);
+            set_server_url.set(settings.server_url);
+            set_auth_token.set(settings.auth_token);
+            set_steam_id.set(settings.steam_id);
+            set_share_claimable_rewards.set(settings.share_claimable_rewards);
             set_include_steam_launch_options.set(settings.include_steam_launch_options);
             set_steam_launch_options.set(settings.steam_launch_options);
             set_launch_game_on_start.set(settings.launch_game_on_start);
             set_steam_launch_options_prompted.set(settings.steam_launch_options_prompted);
+            if asset_status.get_untracked().is_none() {
+                fetch_asset_status();
+            }
         });
     });
+
+    let asset_check_disabled =
+        move || checking_assets.get() || downloading_assets.get() || asset_check_cooldown.get() > 0;
+    let asset_check_label = move || {
+        if downloading_assets.get() {
+            "Downloading...".to_string()
+        } else if checking_assets.get() {
+            "Checking...".to_string()
+        } else {
+            match asset_check_cooldown.get() {
+                0 => "Check Assets Update".to_string(),
+                seconds => format!("Check again in {:02}:{:02}", seconds / 60, seconds % 60),
+            }
+        }
+    };
 
     let current_settings = move || invoke::AppSettings {
         refresh_ms: refresh_ms
@@ -64,6 +124,11 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
             .clamp(100, 5000),
         log_level: log_level.get(),
         proxy_url: proxy_url.get(),
+        asset_manifest_url: asset_manifest_url.get(),
+        server_url: server_url.get(),
+        auth_token: auth_token.get(),
+        steam_id: steam_id.get(),
+        share_claimable_rewards: share_claimable_rewards.get(),
         include_steam_launch_options: include_steam_launch_options.get(),
         steam_launch_options: steam_launch_options.get(),
         launch_game_on_start: launch_game_on_start.get(),
@@ -74,18 +139,6 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         let settings = current_settings();
         spawn_local(async move {
             invoke::invoke_set_settings(settings).await;
-        });
-    };
-
-    let pick_folder = move |_| {
-        spawn_local(async move {
-            if let Some(path) = invoke::invoke_browse_assets_folder().await {
-                set_saving.set(true);
-                invoke::invoke_set_assets_path(&path).await;
-                let root = invoke::invoke_get_assets_root().await;
-                set_assets_root.set(root);
-                set_saving.set(false);
-            }
         });
     };
 
@@ -121,36 +174,6 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
                         <option value="debug">"Debug"</option>
                         <option value="trace">"Trace"</option>
                     </select>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <div class="settings-section-title">"\u{1f310} Proxy"</div>
-
-                <div class="settings-row">
-                    <label class="settings-label">"Proxy URL"</label>
-                    <input type="text" prop:value=proxy_url
-                        on:input=move |ev| {
-                            set_proxy_url.set(event_target_value(&ev));
-                            save_settings();
-                        }
-                    />
-                    <span class="settings-hint">"MITM proxy address"</span>
-                </div>
-
-                <div class="settings-row">
-                    <label class="settings-label">"Status"</label>
-                    <div class="settings-status">
-                        <span class="status-dot" class:green=move || proxy_status.get().map(|s| s.running).unwrap_or(false) class:amber=move || proxy_status.get().map(|s| s.state == "starting").unwrap_or(true) class:red=move || proxy_status.get().map(|s| !s.running && s.state != "starting").unwrap_or(false)></span>
-                        <span style:color=move || {
-                            match proxy_status.get() {
-                                Some(s) if s.running => "var(--green)",
-                                Some(s) if s.state == "starting" => "var(--amber)",
-                                Some(_) => "var(--red)",
-                                None => "var(--amber)",
-                            }
-                        }>{move || proxy_status.get().map(|s| s.message).unwrap_or_else(|| "Starting".to_string())}</span>
-                    </div>
                 </div>
             </div>
 
@@ -202,16 +225,25 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
             <div class="settings-section">
                 <div class="settings-section-title">"\u{1f4da} Catalog"</div>
 
-                <div class="settings-row column">
-                    <label class="settings-label">"Assets folder"</label>
-                    <div class="settings-row-inline">
-                        <span class="settings-value" style="flex: 1; word-break: break-all;">
-                            {move || assets_root.get()}
-                        </span>
-                        <button class="btn-action" on:click=pick_folder disabled=move || saving.get()>
-                            {move || if saving.get() { "Loading..." } else { "\u{1f4c2} Browse" }}
-                        </button>
-                    </div>
+                <div class="settings-row">
+                    <label class="settings-label">"Downloaded version"</label>
+                    <span class="settings-value">
+                        {move || asset_status.get().and_then(|s| s.current_version).unwrap_or_else(|| "Manual / none".to_string())}
+                    </span>
+                </div>
+
+                <div class="settings-row">
+                    <label class="settings-label">"Latest version"</label>
+                    <span class="settings-value">
+                        {move || asset_status.get().and_then(|s| s.latest_version).unwrap_or_else(|| "--".to_string())}
+                    </span>
+                </div>
+
+                <div class="settings-row">
+                    <label class="settings-label">"Hosted status"</label>
+                    <span class="settings-value">
+                        {move || if asset_message.get().is_empty() { "--".to_string() } else { asset_message.get() }}
+                    </span>
                 </div>
 
                 <div class="settings-row">
@@ -253,11 +285,11 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
                 </div>
 
                 <div class="settings-row">
-                    <button class="btn-action" on:click=move |_| {
-                        spawn_local(async {
-                            invoke::invoke_reload_catalog().await;
-                        });
-                    }>"\u{1f504} Reload Catalog"</button>
+                    <button class="btn-action" on:click=move |_| fetch_asset_status() disabled=asset_check_disabled>
+                        <span class:spin-emoji=move || checking_assets.get() || downloading_assets.get() style:display=move || if checking_assets.get() || downloading_assets.get() { "inline-block" } else { "none" }>"\u{1f504}"</span>
+                        {move || if checking_assets.get() || downloading_assets.get() { " " } else { "" }}
+                        {asset_check_label}
+                    </button>
                 </div>
             </div>
 
