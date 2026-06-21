@@ -1,6 +1,7 @@
 use crate::capture;
 use crate::commands::ProxyStatus;
 use crate::state::StateRepository;
+use crate::utils::utc_now_iso;
 use http_body_util::BodyExt;
 use hudsucker::{
     Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
@@ -217,14 +218,28 @@ impl HttpHandler for TbhHandler {
             );
         }
 
-        if !is_interesting(&info.host, &info.path) {
+        if !info.host.contains(TARGET_HOST) {
             self.source = None;
             self.path = None;
             return req.into();
         }
 
-        self.source = Some(info.source.clone());
-        self.path = Some(info.path.clone());
+        let is_interesting = is_interesting(&info.host, &info.path);
+
+        if is_interesting {
+            self.source = Some(info.source.clone());
+            self.path = Some(info.path.clone());
+        } else {
+            self.source = None;
+            self.path = None;
+        }
+
+        let content_type = req
+            .headers()
+            .get(hudsucker::hyper::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
 
         let (parts, body) = req.into_parts();
         let body_bytes = match body.collect().await {
@@ -234,6 +249,22 @@ impl HttpHandler for TbhHandler {
                 return bad_gateway();
             }
         };
+
+        self.emit(json!({
+            "type": "request_log",
+            "at": utc_now_iso(),
+            "method": info.method.clone(),
+            "host": info.host.clone(),
+            "path": info.full_path.clone(),
+            "source": info.source.clone(),
+            "contentType": content_type,
+            "bodyBytes": body_bytes.len(),
+            "body": String::from_utf8_lossy(&body_bytes).into_owned(),
+        }));
+
+        if !is_interesting {
+            return Request::from_parts(parts, Body::from(body_bytes)).into();
+        }
 
         if info.path.contains("/backend-function/base/v1")
             && let Ok(req_json) = serde_json::from_slice::<Value>(&body_bytes)
@@ -351,8 +382,10 @@ fn log_limited(counter: &AtomicUsize, args: std::fmt::Arguments<'_>) {
 }
 
 struct RequestInfo {
+    method: String,
     host: String,
     path: String,
+    full_path: String,
     source: String,
 }
 
@@ -364,16 +397,18 @@ impl RequestInfo {
                 .and_then(|h| h.to_str().ok())
                 .map(|h| h.split(':').next().unwrap_or(h).to_string())
         })?;
-        let path = req
+        let full_path = req
             .uri()
             .path_and_query()
             .map(|p| p.as_str().to_string())
             .unwrap_or_else(|| "/".to_string());
-        let path_no_query = path.split('?').next().unwrap_or("/").to_string();
+        let path_no_query = full_path.split('?').next().unwrap_or("/").to_string();
         let source = format!("{} {}{}", req.method(), host, path_no_query);
         Some(Self {
+            method: req.method().to_string(),
             host,
             path: path_no_query,
+            full_path,
             source,
         })
     }

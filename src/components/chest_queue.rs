@@ -163,62 +163,77 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                     </tr>
                 </thead>
                 <tbody>
-                    <For each=filtered_rows key=|row| row.key.clone().unwrap_or_default() let(row)>
-                        <tr>
-                            <td style="color: var(--text-dim)">{row.reward_id.unwrap_or(0)}</td>
-                            <td>
-                                <div class="cell-type">
-                                    <span class="type-icon">{chest_emoji(&row.box_label)}</span>
-                                    <span>{row.box_label.clone()}</span>
-                                </div>
-                            </td>
-                            <td>
-                                {if row.is_get {
-                                    view! { <span class="pill purple"><span class="pill-dot">"\u{2714}\u{fe0f}"</span> " Claimed"</span> }.into_any()
-                                } else if row.remaining <= 0.0 {
-                                    view! { <span class="pill green"><span class="pill-dot">"\u{25cf}"</span> " Claimable"</span> }.into_any()
-                                } else {
-                                    view! { <span class="pill gray"><span class="pill-dot">"\u{1f512}"</span> " Waiting"</span> }.into_any()
-                                }}
-                            </td>
-                            <td>
-                                <div class="unlock-cell">
-                                    <div class="unlock-bar">
-                                        <div class="unlock-bar-fill" style:width={format!("{}%", ((86400.0 - row.remaining) / 86400.0 * 100.0).min(100.0))}></div>
+                    {move || filtered_rows().into_iter().enumerate().map(|(index, row)| {
+                        let box_label = row.box_label.clone();
+                        let box_icon = chest_emoji(&box_label);
+                        let rarity = row.rarity.clone();
+                        let reward_icon = reward_emoji(&rarity);
+                        let reward_name = row.name.clone();
+                        let rarity_badge_class = format!("rarity-badge {}", rarity_class(&rarity));
+                        let rarity_badge_color = rarity_color(&rarity);
+                        let rarity_badge_diamond = rarity_diamond(&rarity);
+                        let rarity_badge_title = rarity_title(&rarity);
+                        let remaining = row.remaining;
+                        let unlock_width = format!("{}%", ((86400.0 - remaining) / 86400.0 * 100.0).min(100.0));
+                        let is_get = row.is_get;
+                        let key_for_open = row.key.clone().unwrap_or_default();
+                        view! {
+                            <tr>
+                                <td style="color: var(--text-dim)">{index + 1}</td>
+                                <td>
+                                    <div class="cell-type">
+                                        <span class="type-icon">{box_icon}</span>
+                                        <span>{box_label}</span>
                                     </div>
-                                    {if row.remaining <= 0.0 {
-                                        view! { <span class="unlock-time">"--"</span> }.into_any()
+                                </td>
+                                <td>
+                                    {if is_get {
+                                        view! { <span class="pill purple"><span class="pill-dot">"\u{2714}\u{fe0f}"</span> " Claimed"</span> }.into_any()
+                                    } else if remaining <= 0.0 {
+                                        view! { <span class="pill green"><span class="pill-dot">"\u{25cf}"</span> " Claimable"</span> }.into_any()
                                     } else {
-                                        let secs = row.remaining as i64;
-                                        let h = secs / 3600;
-                                        let m = (secs % 3600) / 60;
-                                        let s = secs % 60;
-                                        view! { <span class="unlock-time">{format!("{:02}:{:02}:{:02}", h, m, s)}</span> }.into_any()
+                                        view! { <span class="pill gray"><span class="pill-dot">"\u{1f512}"</span> " Waiting"</span> }.into_any()
                                     }}
-                                </div>
-                            </td>
-                            <td>
-                                <div class="cell-reward">
-                                    <span class="rw-icon">{reward_emoji(&row.rarity)}</span>
-                                    <span class="rw-name">{row.name.clone()}</span>
-                                </div>
-                            </td>
-                            <td>
-                                <span class={format!("rarity-badge {}", rarity_class(&row.rarity))} style:color=rarity_color(&row.rarity)>
-                                    <span class="diamond">{rarity_diamond(&row.rarity)}</span>
-                                    {rarity_title(&row.rarity)}
-                                </span>
-                            </td>
-                            <td>
-                                <button class="btn-open" on:click=move |_| {
-                                    let k = row.key.clone().unwrap_or_default();
-                                    spawn_local(async move {
-                                        crate::invoke::invoke_mark_opened(&k).await;
-                                    });
-                                }>"\u{2714}\u{fe0f}"</button>
-                            </td>
-                        </tr>
-                    </For>
+                                </td>
+                                <td>
+                                    <div class="unlock-cell">
+                                        <div class="unlock-bar">
+                                            <div class="unlock-bar-fill" style:width=unlock_width></div>
+                                        </div>
+                                        {if remaining <= 0.0 {
+                                            view! { <span class="unlock-time">"--"</span> }.into_any()
+                                        } else {
+                                            let secs = remaining as i64;
+                                            let h = secs / 3600;
+                                            let m = (secs % 3600) / 60;
+                                            let s = secs % 60;
+                                            view! { <span class="unlock-time">{format!("{:02}:{:02}:{:02}", h, m, s)}</span> }.into_any()
+                                        }}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="cell-reward">
+                                        <span class="rw-icon">{reward_icon}</span>
+                                        <span class="rw-name">{reward_name}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class=rarity_badge_class style:color=rarity_badge_color>
+                                        <span class="diamond">{rarity_badge_diamond}</span>
+                                        {rarity_badge_title}
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn-open" on:click=move |_| {
+                                        let k = key_for_open.clone();
+                                        spawn_local(async move {
+                                            crate::invoke::invoke_mark_opened(&k).await;
+                                        });
+                                    }>"\u{2714}\u{fe0f}"</button>
+                                </td>
+                            </tr>
+                        }
+                    }).collect::<Vec<_>>()}
                 </tbody>
             </table>
         </div>

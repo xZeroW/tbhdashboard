@@ -134,6 +134,7 @@ pub enum Tab {
     ChestQueue,
     RerollPreview,
     FarmRanking,
+    Requests,
     Settings,
 }
 
@@ -141,6 +142,7 @@ const TAB_DEFS: &[(Tab, &str, &str, bool)] = &[
     (Tab::ChestQueue, "Queue", "\u{1f4e6}", false),
     (Tab::RerollPreview, "Reroll", "\u{1f3b2}", true),
     (Tab::FarmRanking, "Farming", "\u{1f33e}", false),
+    (Tab::Requests, "Requests", "\u{1f50e}", false),
     (Tab::Settings, "Settings", "\u{1f527}", false),
 ];
 
@@ -884,6 +886,9 @@ fn Dashboard(
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::FarmRanking { "block" } else { "none" }}>
                         <components::farm_ranking::FarmRanking tick/>
+                    </div>
+                    <div style:display={move || if active_tab.get() == Tab::Requests { "block" } else { "none" }}>
+                        <components::requests::RequestHistory tick/>
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::Settings { "block" } else { "none" }}>
                         <components::settings::Settings tick/>

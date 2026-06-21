@@ -67,6 +67,8 @@ pub fn run() {
             commands::get_last_processbox,
             commands::get_farm_ranking,
             commands::get_events,
+            commands::get_request_history,
+            commands::clear_request_history,
             commands::get_catalog_status,
             commands::get_rarity_order,
             commands::reload_catalog,

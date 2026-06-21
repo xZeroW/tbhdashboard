@@ -1,4 +1,4 @@
-use crate::models::{AppState, StateEvent};
+use crate::models::{AppState, RequestLogEntry, StateEvent};
 use crate::utils::utc_now_iso;
 use anyhow::{Context, Result};
 use std::fs;
@@ -7,6 +7,8 @@ use std::path::PathBuf;
 pub struct StateRepository {
     pub path: PathBuf,
 }
+
+const MAX_REQUEST_HISTORY: usize = 200;
 
 impl StateRepository {
     pub fn new(path: PathBuf) -> Self {
@@ -39,6 +41,15 @@ impl StateRepository {
         });
         let keep = state.events.len().saturating_sub(80);
         state.events.drain(..keep);
+    }
+
+    pub fn add_request_log(&self, state: &mut AppState, entry: RequestLogEntry) {
+        state.request_history.push(entry);
+        let keep = state
+            .request_history
+            .len()
+            .saturating_sub(MAX_REQUEST_HISTORY);
+        state.request_history.drain(..keep);
     }
 }
 
@@ -100,5 +111,25 @@ mod tests {
         }
         assert_eq!(state.events.len(), 80);
         assert_eq!(state.events[0].text, "event 20");
+    }
+
+    #[test]
+    fn add_request_log_trims_to_limit() {
+        let (repo, _dir) = temp_repo();
+        let mut state = AppState::default();
+        for i in 0..250 {
+            repo.add_request_log(
+                &mut state,
+                RequestLogEntry {
+                    source: format!("GET thebackend.io/request-{i}"),
+                    ..Default::default()
+                },
+            );
+        }
+        assert_eq!(state.request_history.len(), 200);
+        assert_eq!(
+            state.request_history[0].source,
+            "GET thebackend.io/request-50"
+        );
     }
 }

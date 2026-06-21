@@ -208,6 +208,19 @@ pub struct PaddleCheckoutResult {
     pub error: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogEntry {
+    pub at: String,
+    pub method: String,
+    pub host: String,
+    pub path: String,
+    pub source: String,
+    pub content_type: String,
+    pub body_bytes: usize,
+    pub body: String,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -474,4 +487,16 @@ pub async fn invoke_upload_claimable_reward_observations() -> ObservationUploadR
         skipped: 0,
         message: "Failed to upload observations".to_string(),
     })
+}
+
+pub async fn invoke_get_request_history() -> Vec<RequestLogEntry> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_request_history", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
+}
+
+pub async fn invoke_clear_request_history() -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("clear_request_history", args).await;
+    result.as_bool().unwrap_or(false)
 }

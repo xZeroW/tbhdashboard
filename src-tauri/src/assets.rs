@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::Cursor,
+    io::{Cursor, Read},
     path::{Path, PathBuf},
 };
 
@@ -12,6 +12,7 @@ use zip::ZipArchive;
 use crate::{config, models::AppState, state::StateRepository};
 
 const ASSET_USER_AGENT: &str = "curl/8.5.0";
+const WIKI_ITEMS_URL: &str = "https://taskbarhero.wiki/data/items.json";
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -292,3 +293,98 @@ fn safe_version_dir(version: &str) -> String {
 
 #[allow(dead_code)]
 fn _assert_state_default_compat(_: &AppState) {}
+
+/// Sidecar metadata stored next to _wiki_items.json.
+#[derive(Serialize, Deserialize)]
+struct WikiItemsMeta {
+    sha256: String,
+    etag: Option<String>,
+}
+
+/// Download `_wiki_items.json` into `root/TextAsset/` if missing or corrupted.
+///
+/// On each call the existing file's SHA-256 is compared against the stored
+/// `.meta` sidecar. If they match — file is intact — a conditional HTTP GET
+/// (If-None-Match) is sent; the server's 304 response skips the download.
+/// When the server returns new content the file and its meta are updated.
+pub fn ensure_wiki_items(root: &Path) {
+    let text_dir = root.join("TextAsset");
+    if !text_dir.is_dir() {
+        return;
+    }
+    let json_path = text_dir.join("_wiki_items.json");
+    let meta_path = text_dir.join("_wiki_items.json.meta");
+
+    let mut prev_etag: Option<String> = None;
+
+    if json_path.exists()
+        && meta_path.exists()
+        && let Ok(body) = fs::read_to_string(&meta_path)
+        && let Ok(meta) = serde_json::from_str::<WikiItemsMeta>(&body)
+        && let Ok(actual) = sha256_hex(&json_path)
+        && actual == meta.sha256
+    {
+        prev_etag = meta.etag;
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(ASSET_USER_AGENT)
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new());
+
+    let mut req = client.get(WIKI_ITEMS_URL);
+    if let Some(ref etag) = prev_etag {
+        req = req.header(reqwest::header::IF_NONE_MATCH, etag);
+    }
+
+    let resp = match req.send() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[assets] wiki items request failed: {e}");
+            return;
+        }
+    };
+
+    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return;
+    }
+    if !resp.status().is_success() {
+        eprintln!("[assets] wiki items download: HTTP {}", resp.status());
+        return;
+    }
+
+    let etag = resp
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let bytes = match resp.bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[assets] wiki items read body failed: {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = fs::write(&json_path, &bytes) {
+        eprintln!("[assets] wiki items write failed: {e}");
+        return;
+    }
+
+    let hash = sha256_hex_bytes(&bytes);
+    let meta = WikiItemsMeta { sha256: hash, etag };
+    if let Ok(json) = serde_json::to_string(&meta) {
+        let _ = fs::write(&meta_path, &json);
+    }
+}
+
+fn sha256_hex(path: &Path) -> Result<String, std::io::Error> {
+    let mut file = fs::File::open(path)?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    Ok(hex::encode(Sha256::digest(&buf)))
+}
+
+fn sha256_hex_bytes(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}

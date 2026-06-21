@@ -31,6 +31,7 @@ pub enum SidecarEvent {
         source: String,
         keys: Vec<String>,
     },
+    RequestLogged(RequestLogEntry),
     Unknown,
 }
 
@@ -120,6 +121,9 @@ pub fn parse_sidecar_line(line: &str) -> SidecarEvent {
                 .to_string(),
             keys: v.get("keys").map(parse_jsonish_list).unwrap_or_default(),
         },
+        "request_log" => serde_json::from_value(v)
+            .map(SidecarEvent::RequestLogged)
+            .unwrap_or(SidecarEvent::Unknown),
         _ => SidecarEvent::Unknown,
     }
 }
@@ -189,6 +193,11 @@ pub fn apply_sidecar_event(event: SidecarEvent, repo: &StateRepository) {
                 let changed = chests::mark_claimed_by_keys(&keys, &source, repo);
                 println!("[TBH-Rust] marked {} claimed from sidecar", changed);
             }
+        }
+        SidecarEvent::RequestLogged(entry) => {
+            let mut state = repo.load();
+            repo.add_request_log(&mut state, entry);
+            repo.save(&state).unwrap();
         }
         SidecarEvent::Unknown => {}
     }

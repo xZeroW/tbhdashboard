@@ -55,7 +55,7 @@ impl StaticCatalog {
 
     fn load(&mut self) {
         self.load_items();
-        self.load_display_names();
+        self.load_wiki_names();
         self.load_groups();
         self.load_drops();
         self.load_stages();
@@ -87,62 +87,37 @@ impl StaticCatalog {
         }
     }
 
-    fn load_display_names(&mut self) {
-        let mb = self.root.join("MonoBehaviour");
-        if !mb.exists() {
+    fn load_wiki_names(&mut self) {
+        let path = self.root.join("TextAsset").join("_wiki_items.json");
+        if !path.exists() {
             return;
         }
-        let id_re = Regex::new(r"_Inv_\s*(\d+)").unwrap();
-        let name_re = Regex::new(r"value:\s*(.+)").unwrap();
-        let fallback_re = Regex::new(r"_Inv_\s*\d+\s+(.+?)\.asset$").unwrap();
-
-        if let Ok(entries) = std::fs::read_dir(&mb) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if !name_str.starts_with("_Inv_") || !name_str.ends_with(".asset") {
-                    continue;
-                }
-                let iid = id_re
-                    .captures(&name_str)
-                    .and_then(|c| c.get(1))
-                    .and_then(|m| m.as_str().parse::<i64>().ok());
-                let iid = match iid {
-                    Some(id) => id,
-                    None => continue,
-                };
-                let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
-                let val = text
-                    .lines()
-                    .find_map(|line| {
-                        let line = line.trim();
-                        name_re.captures(line).and_then(|c| {
-                            let v = c
-                                .get(1)?
-                                .as_str()
-                                .trim()
-                                .trim_matches(|c| c == '\'' || c == '"');
-                            if v.is_empty() {
-                                None
-                            } else {
-                                Some(v.to_string())
-                            }
-                        })
-                    })
-                    .or_else(|| {
-                        fallback_re.captures(&name_str).and_then(|c| {
-                            let v = c.get(1)?.as_str().trim();
-                            if v.is_empty() {
-                                None
-                            } else {
-                                Some(v.to_string())
-                            }
-                        })
-                    });
-                if let Some(val) = val {
-                    self.display_names.insert(iid, val);
-                }
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[catalog] failed to read {}: {e}", path.display());
+                return;
             }
+        };
+        let items: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[catalog] failed to parse _wiki_items.json: {e}");
+                return;
+            }
+        };
+        for entry in &items {
+            let id = match entry.get("id").and_then(|v| v.as_i64()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let name = entry["name"]["en-US"].as_str().unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            self.display_names
+                .entry(id)
+                .or_insert_with(|| name.to_string());
         }
     }
 
@@ -272,7 +247,7 @@ impl StaticCatalog {
                 };
                 (rarity.to_string(), self.pretty_name(iid))
             }
-            None => ("UNKNOWN".to_string(), iid.to_string()),
+            None => ("UNKNOWN".to_string(), self.pretty_name(iid)),
         }
     }
 
@@ -550,6 +525,15 @@ mod tests {
     }
 
     #[test]
+    fn item_parts_unknown_id_uses_display_name() {
+        let mut cat = make_catalog_with_items();
+        cat.display_names.insert(99999, "Wooden Armor".into());
+        let (rarity, name) = cat.item_parts(Some(99999));
+        assert_eq!(rarity, "UNKNOWN");
+        assert_eq!(name, "Wooden Armor");
+    }
+
+    #[test]
     fn item_parts_none() {
         let cat = make_catalog_with_items();
         let (rarity, name) = cat.item_parts(None);
@@ -720,20 +704,6 @@ mod tests {
     }
 
     #[test]
-    fn id_regex_matches_valid_ids() {
-        let re = Regex::new(r"_Inv_\s*(\d+)").unwrap();
-        assert!(re.is_match("_Inv_12345 Sword.asset"));
-        assert!(re.is_match("_Inv_12345.asset"));
-        assert!(re.captures("_Inv_ 12345 Sword.asset").is_some());
-    }
-
-    #[test]
-    fn id_regex_rejects_invalid() {
-        let re = Regex::new(r"_Inv_\s*(\d+)").unwrap();
-        assert!(!re.is_match("Other_12345.asset"));
-    }
-
-    #[test]
     fn box_regex_matches() {
         let re = Regex::new(r"^9[12]\d{4}$").unwrap();
         assert!(re.is_match("910651"));
@@ -749,27 +719,5 @@ mod tests {
         assert!(!re.is_match("930651"));
         assert!(!re.is_match("91065"));
         assert!(!re.is_match("9106510"));
-    }
-
-    #[test]
-    fn value_regex_extracts_name() {
-        let re = Regex::new(r"value:\s*(.+)").unwrap();
-        let line = "  value: 'Flame Sword'";
-        let caps = re.captures(line).unwrap();
-        let val = caps
-            .get(1)
-            .unwrap()
-            .as_str()
-            .trim()
-            .trim_matches(|c| c == '\'' || c == '"');
-        assert_eq!(val, "Flame Sword");
-    }
-
-    #[test]
-    fn fallback_regex_extracts_name() {
-        let re = Regex::new(r"_Inv_\s*\d+\s+(.+?)\.asset$").unwrap();
-        let name = "_Inv_12345 Flame Sword.asset";
-        let caps = re.captures(name).unwrap();
-        assert_eq!(caps.get(1).unwrap().as_str(), "Flame Sword");
     }
 }

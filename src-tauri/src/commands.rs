@@ -154,9 +154,12 @@ impl ProxyStatus {
 impl ManagedState {
     pub fn new() -> Self {
         let repo = StateRepository::new(config::state_path());
+        let catalog_root = configured_assets_root(&repo);
+        let wiki_root = catalog_root.clone().unwrap_or_else(config::assets_root);
+        crate::assets::ensure_wiki_items(&wiki_root);
         Self {
             repo,
-            catalog: Mutex::new(StaticCatalog::new(None)),
+            catalog: Mutex::new(StaticCatalog::new(catalog_root)),
             proxy_status: Arc::new(Mutex::new(ProxyStatus::starting())),
         }
     }
@@ -168,6 +171,10 @@ impl ManagedState {
     pub fn proxy_status(&self) -> Arc<Mutex<ProxyStatus>> {
         self.proxy_status.clone()
     }
+}
+
+fn configured_assets_root(repo: &StateRepository) -> Option<PathBuf> {
+    repo.load().assets_path.as_deref().map(PathBuf::from)
 }
 
 #[tauri::command]
@@ -769,6 +776,20 @@ pub fn get_events(state: State<'_, ManagedState>) -> Vec<StateEvent> {
     state.repo().load().events
 }
 
+#[tauri::command]
+pub fn get_request_history(state: State<'_, ManagedState>) -> Vec<RequestLogEntry> {
+    let mut history = state.repo().load().request_history;
+    history.reverse();
+    history
+}
+
+#[tauri::command]
+pub fn clear_request_history(state: State<'_, ManagedState>) -> bool {
+    let mut state_data = state.repo().load();
+    state_data.request_history.clear();
+    state.repo().save(&state_data).is_ok()
+}
+
 // ---- Catalog Status ----
 
 #[derive(serde::Serialize)]
@@ -804,8 +825,10 @@ pub fn get_rarity_order() -> Vec<String> {
 
 #[tauri::command]
 pub fn reload_catalog(state: State<'_, ManagedState>) -> bool {
+    let root = configured_assets_root(state.repo());
+    crate::assets::ensure_wiki_items(&root.clone().unwrap_or_else(config::assets_root));
     let mut catalog = state.catalog.lock().unwrap();
-    *catalog = StaticCatalog::new(None);
+    *catalog = StaticCatalog::new(root);
     catalog.valid
 }
 
@@ -827,6 +850,7 @@ pub fn set_assets_path(state: State<'_, ManagedState>, path: String) -> bool {
         .assets_path
         .as_deref()
         .map(std::path::PathBuf::from);
+    crate::assets::ensure_wiki_items(&root.clone().unwrap_or_else(config::assets_root));
     let mut catalog = state.catalog.lock().unwrap();
     *catalog = StaticCatalog::new(root);
     catalog.valid
@@ -854,8 +878,10 @@ pub async fn download_latest_assets(
     let result = crate::assets::download_latest(&repo).await;
 
     if result.ok {
+        let root = configured_assets_root(state.repo());
+        crate::assets::ensure_wiki_items(&root.clone().unwrap_or_else(config::assets_root));
         let mut catalog = state.catalog.lock().unwrap();
-        *catalog = StaticCatalog::new(None);
+        *catalog = StaticCatalog::new(root);
     }
 
     Ok(result)

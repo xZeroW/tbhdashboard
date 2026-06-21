@@ -141,6 +141,22 @@ pub struct StateEvent {
     pub text: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogEntry {
+    pub at: String,
+    pub method: String,
+    pub host: String,
+    pub path: String,
+    pub source: String,
+    #[serde(default)]
+    pub content_type: String,
+    #[serde(default)]
+    pub body_bytes: usize,
+    #[serde(default)]
+    pub body: String,
+}
+
 /// Top-level application state, persisted as JSON.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -237,6 +253,8 @@ pub struct AppState {
     pub assets_version: Option<String>,
     #[serde(default)]
     pub uploaded_claimable_observation_keys: Vec<String>,
+    #[serde(default)]
+    pub request_history: Vec<RequestLogEntry>,
     #[serde(default)]
     pub settings: AppSettings,
 }

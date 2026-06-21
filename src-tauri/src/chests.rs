@@ -17,12 +17,12 @@ pub fn box_label(box_id: Option<i64>) -> String {
     }
     let s = bid.to_string();
     if s.starts_with("910") {
-        return format!("Common Treasure Chest ({})", bid);
+        return "Common Treasure Chest".to_string();
     }
     if s.starts_with("920") {
-        return format!("Stage Treasure Chest ({})", bid);
+        return "Stage Treasure Chest".to_string();
     }
-    format!("Box {}", bid)
+    "Box".to_string()
 }
 
 pub fn normalize_chest(c: &DynamicMap, source: &str) -> Option<ChestRecord> {
@@ -257,17 +257,17 @@ mod tests {
 
     #[test]
     fn box_label_910_prefix() {
-        assert_eq!(box_label(Some(910999)), "Common Treasure Chest (910999)");
+        assert_eq!(box_label(Some(910999)), "Common Treasure Chest");
     }
 
     #[test]
     fn box_label_920_prefix() {
-        assert_eq!(box_label(Some(920999)), "Stage Treasure Chest (920999)");
+        assert_eq!(box_label(Some(920999)), "Stage Treasure Chest");
     }
 
     #[test]
     fn box_label_unknown_id() {
-        assert_eq!(box_label(Some(12345)), "Box 12345");
+        assert_eq!(box_label(Some(12345)), "Box");
     }
 
     #[test]
