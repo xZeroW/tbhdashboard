@@ -79,6 +79,7 @@ pub fn run() {
             commands::download_latest_assets,
             commands::upload_claimable_reward_observations,
             commands::browse_assets_folder,
+            commands::skip_login,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

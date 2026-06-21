@@ -207,7 +207,7 @@ pub fn login(
     if server_url.is_empty() || username.trim().is_empty() || password.is_empty() {
         return LoginResult {
             ok: false,
-            message: "Enter server URL, username, and password.".to_string(),
+            message: "Enter username, and password.".to_string(),
             user: None,
             status: None,
         };
@@ -296,7 +296,7 @@ pub fn register(
     {
         return RegisterResult {
             ok: false,
-            message: "Enter server URL, username, email, and password.".to_string(),
+            message: "Enter username, email, and password.".to_string(),
             user_id: None,
             username: None,
             email: None,
@@ -427,7 +427,7 @@ pub fn get_inactive_checkout(
     if server_url.is_empty() || username.trim().is_empty() || password.is_empty() {
         return InactiveCheckoutResult {
             ok: false,
-            message: "Enter server URL, username, and password.".to_string(),
+            message: "Enter username, and password.".to_string(),
             user_id: None,
             username: None,
             email: None,
@@ -491,6 +491,17 @@ pub fn get_inactive_checkout(
 #[tauri::command]
 pub fn get_current_user(state: State<'_, ManagedState>) -> Option<AuthUser> {
     let settings = normalize_settings(state.repo().load().settings);
+
+    if settings.offline_mode {
+        return Some(AuthUser {
+            id: "local".to_string(),
+            username: "Local".to_string(),
+            email: None,
+            is_admin: true,
+            entitlement: None,
+        });
+    }
+
     let server_url = settings.server_url.trim().trim_end_matches('/').to_string();
     let auth_token = settings.auth_token.trim().to_string();
     if server_url.is_empty() || auth_token.is_empty() {
@@ -521,7 +532,25 @@ pub fn logout(state: State<'_, ManagedState>) -> bool {
     }
 
     state_data.settings.auth_token.clear();
+    state_data.settings.offline_mode = false;
     state.repo().save(&state_data).is_ok()
+}
+
+#[tauri::command]
+pub fn skip_login(state: State<'_, ManagedState>) -> AuthUser {
+    let mut state_data = state.repo().load();
+    state_data.settings.offline_mode = true;
+    state_data.settings.server_url.clear();
+    state_data.settings.auth_token.clear();
+    let _ = state.repo().save(&state_data);
+
+    AuthUser {
+        id: "local".to_string(),
+        username: "Local".to_string(),
+        email: None,
+        is_admin: true,
+        entitlement: None,
+    }
 }
 
 fn auth_http_client() -> reqwest::blocking::Client {

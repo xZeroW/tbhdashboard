@@ -600,6 +600,22 @@ where
                     }}
                 </button>
 
+                <div class="login-divider">
+                    <span>"or"</span>
+                </div>
+
+                <button class="login-button secondary" disabled=move || logging_in.get() on:click=move |_| {
+                    set_logging_in.set(true);
+                    set_message.set(String::new());
+                    spawn_local(async move {
+                        let user = invoke::invoke_skip_login().await;
+                        set_logging_in.set(false);
+                        on_login(user);
+                    });
+                }>
+                    {move || if logging_in.get() { "Entering offline mode..." } else { "Offline Mode (skip login)" }}
+                </button>
+
                 <div class="login-message"
                     class:error=move || message_is_error.get() && !message.get().is_empty()
                     class:muted=move || !message_is_error.get()

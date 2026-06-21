@@ -85,6 +85,8 @@ pub struct AppSettings {
     pub auth_token: String,
     pub steam_id: String,
     pub share_claimable_rewards: bool,
+    #[serde(default)]
+    pub offline_mode: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -236,6 +238,7 @@ impl Default for AppSettings {
             auth_token: String::new(),
             steam_id: String::new(),
             share_claimable_rewards: false,
+            offline_mode: false,
         }
     }
 }
@@ -441,6 +444,12 @@ pub async fn invoke_logout() -> bool {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("logout", args).await;
     result.as_bool().unwrap_or(false)
+}
+
+pub async fn invoke_skip_login() -> AuthUser {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("skip_login", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
 
 pub async fn invoke_set_settings(settings: AppSettings) -> bool {

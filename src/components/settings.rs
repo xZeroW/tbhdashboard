@@ -133,6 +133,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         steam_launch_options: steam_launch_options.get(),
         launch_game_on_start: launch_game_on_start.get(),
         steam_launch_options_prompted: steam_launch_options_prompted.get(),
+        offline_mode: false,
     };
 
     let save_settings = move || {

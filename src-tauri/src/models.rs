@@ -184,6 +184,8 @@ pub struct AppSettings {
     pub steam_id: String,
     #[serde(default)]
     pub share_claimable_rewards: bool,
+    #[serde(default)]
+    pub offline_mode: bool,
 }
 
 impl Default for AppSettings {
@@ -201,6 +203,7 @@ impl Default for AppSettings {
             auth_token: String::new(),
             steam_id: String::new(),
             share_claimable_rewards: false,
+            offline_mode: false,
         }
     }
 }

@@ -206,6 +206,35 @@ body { overflow: hidden; height: 100vh; }
 .login-button:hover:not(:disabled) { filter: brightness(1.08); }
 .login-button:disabled { cursor: wait; opacity: 0.72; }
 
+.login-button.secondary {
+    margin-top: 0;
+    border-color: var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-weight: 500;
+    box-shadow: none;
+}
+.login-button.secondary:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--text-dim);
+}
+
+.login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+.login-divider::before,
+.login-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
 .login-message {
     min-height: 20px;
     margin-top: 14px;
