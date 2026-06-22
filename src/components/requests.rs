@@ -65,7 +65,7 @@ fn local_time(at: &str) -> String {
 #[component]
 pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
     let (requests, set_requests) = signal(Vec::<invoke::RequestLogEntry>::new());
-    let (selected, set_selected) = signal(None::<invoke::RequestLogEntry>);
+    let (selected_key, set_selected_key) = signal(None::<String>);
 
     Effect::new(move |_| {
         tick.get();
@@ -75,11 +75,16 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
         });
     });
 
+    let selected = move || {
+        let key = selected_key.get()?;
+        requests.get().into_iter().find(|r| format!("{}:{}", r.at, r.source) == key)
+    };
+
     let clear_history = move |_| {
         spawn_local(async move {
             if invoke::invoke_clear_request_history().await {
                 set_requests.set(Vec::new());
-                set_selected.set(None);
+                set_selected_key.set(None);
             }
         });
     };
@@ -117,7 +122,7 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
                             key=|req| format!("{}:{}", req.at, req.source)
                             let(req)
                         >
-                            <tr style="cursor: pointer;" on:click=move |_| set_selected.set(Some(req.clone()))>
+                            <tr style="cursor: pointer;" on:click=move |_| set_selected_key.set(Some(format!("{}:{}", req.at, req.source)))>
                                 <td style="color: var(--text-dim); font-family: var(--font-mono); font-size: 12px;">{local_time(&req.at)}</td>
                                 <td><span class=method_pill_class(&req.method)>{req.method.clone()}</span></td>
                                 <td style="font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere;">{req.path.clone()}</td>
@@ -129,8 +134,8 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
             </table>
         </div>
 
-        <Show when=move || selected.get().is_some()>
-            {move || selected.get().map(|req| {
+        <Show when=move || selected().is_some()>
+            {move || selected().map(|req| {
                 let has_req = !req.body.trim().is_empty();
                 let has_res = !req.response_body.trim().is_empty();
                 view! {
