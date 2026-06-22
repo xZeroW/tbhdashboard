@@ -9,6 +9,7 @@ mod nethelper;
 mod observations;
 mod proxy;
 mod state;
+mod updater;
 mod utils;
 
 use commands::ManagedState;
@@ -25,8 +26,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .manage(managed)
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+
             let state = app.state::<ManagedState>();
 
             chests::clear_all(state.repo());
@@ -80,6 +87,8 @@ pub fn run() {
             commands::upload_claimable_reward_observations,
             commands::browse_assets_folder,
             commands::skip_login,
+            updater::check_update,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

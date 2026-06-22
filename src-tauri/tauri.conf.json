@@ -27,6 +27,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,5 +38,13 @@
     "category": "Game",
     "shortDescription": "TaskBarHero game dashboard",
     "longDescription": "A read-only MITM proxy dashboard for TaskBarHero, tracking chest queues, boss drops, and farming efficiency."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ0MzE4MEQ0MkJGRDFFNUUKUldSZUh2MHIxSUF4MUtGMHlOdGdoVDhuSjJZU1JJZndrTUJ3cEtncTYrWXB0dUNqUm41U1RscGQK",
+      "endpoints": [
+        "https://github.com/xZeroW/tbhdashboard/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
