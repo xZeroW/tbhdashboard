@@ -513,31 +513,3 @@ pub async fn invoke_clear_request_history() -> bool {
     let result = invoke("clear_request_history", args).await;
     result.as_bool().unwrap_or(false)
 }
-
-// ---- Updater types and invokes ----
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateInfo {
-    pub version: String,
-    pub current_version: String,
-    pub body: Option<String>,
-    pub date: Option<String>,
-}
-
-pub async fn invoke_check_update() -> Option<UpdateInfo> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("check_update", args).await;
-    serde_wasm_bindgen::from_value(result).ok().flatten()
-}
-
-pub async fn invoke_install_update() -> Result<(), String> {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("install_update", args).await;
-    if result.is_null() {
-        Ok(())
-    } else {
-        Err(serde_wasm_bindgen::from_value::<String>(result)
-            .unwrap_or_else(|_| "Unknown error".to_string()))
-    }
-}

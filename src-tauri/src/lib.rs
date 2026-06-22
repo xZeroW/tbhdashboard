@@ -9,6 +9,7 @@ mod nethelper;
 mod observations;
 mod proxy;
 mod state;
+#[cfg(desktop)]
 mod updater;
 mod utils;
 
@@ -26,13 +27,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
         .manage(managed)
         .setup(|app| {
             #[cfg(desktop)]
             {
+                let app_handle = app.handle().clone();
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
+                updater::update_on_startup(app_handle);
             }
 
             let state = app.state::<ManagedState>();
@@ -88,8 +90,6 @@ pub fn run() {
             commands::upload_claimable_reward_observations,
             commands::browse_assets_folder,
             commands::skip_login,
-            updater::check_update,
-            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
