@@ -221,6 +221,10 @@ pub struct RequestLogEntry {
     pub content_type: String,
     pub body_bytes: usize,
     pub body: String,
+    #[serde(default)]
+    pub response_body: String,
+    #[serde(default)]
+    pub response_body_bytes: usize,
 }
 
 impl Default for AppSettings {

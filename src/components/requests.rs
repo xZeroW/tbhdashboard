@@ -12,15 +12,36 @@ fn method_pill_class(method: &str) -> &'static str {
     }
 }
 
+fn decode_nested_result(v: &mut serde_json::Value) {
+    if let serde_json::Value::Object(map) = v {
+        if let Some(serde_json::Value::String(s)) = map.get("result") {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+                map.insert("result".to_string(), parsed);
+            }
+        }
+        for val in map.values_mut() {
+            decode_nested_result(val);
+        }
+    } else if let serde_json::Value::Array(arr) = v {
+        for val in arr.iter_mut() {
+            decode_nested_result(val);
+        }
+    }
+}
+
 fn pretty_body(body: &str) -> String {
     let trimmed = body.trim();
     if trimmed.is_empty() {
-        return "<empty body>".to_string();
+        return "<empty>".to_string();
     }
 
-    serde_json::from_str::<serde_json::Value>(trimmed)
-        .and_then(|value| serde_json::to_string_pretty(&value))
-        .unwrap_or_else(|_| body.to_string())
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(mut value) => {
+            decode_nested_result(&mut value);
+            serde_json::to_string_pretty(&value).unwrap_or_else(|_| body.to_string())
+        }
+        Err(_) => body.to_string(),
+    }
 }
 
 fn local_time(at: &str) -> String {
@@ -68,7 +89,7 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
             <div>
                 <div class="panel-title">"REQUEST HISTORY"</div>
                 <div style="color: var(--text-dim); font-size: 13px; margin-top: 4px;">
-                    "Recent captured thebackend.io requests with request bodies. Newest first."
+                    "Captured thebackend.io requests and responses."
                 </div>
             </div>
             <button class="btn-action" on:click=clear_history>"Clear"</button>
@@ -110,7 +131,8 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
 
         <Show when=move || selected.get().is_some()>
             {move || selected.get().map(|req| {
-                let formatted_body = pretty_body(&req.body);
+                let has_req = !req.body.trim().is_empty();
+                let has_res = !req.response_body.trim().is_empty();
                 view! {
                 <div class="table-panel" style="margin-top: 16px; padding: 16px;">
                     <div class="panel-head">
@@ -121,7 +143,16 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
                             </div>
                         </div>
                     </div>
-                    <pre style="margin-top: 14px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5;">{formatted_body}</pre>
+
+                    <Show when=move || has_req>
+                        <div style="margin-top: 14px; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">"Request"</div>
+                        <pre style="margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5;">{pretty_body(&req.body)}</pre>
+                    </Show>
+
+                    <Show when=move || has_res>
+                        <div style="margin-top: 16px; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">"Response ({})" {format!("{} bytes", req.response_body_bytes)}</div>
+                        <pre style="margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5;">{pretty_body(&req.response_body)}</pre>
+                    </Show>
                 </div>
             }})}
         </Show>

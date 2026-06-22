@@ -319,6 +319,14 @@ impl HttpHandler for TbhHandler {
             }
         };
 
+        self.emit(json!({
+            "type": "response_log",
+            "at": utc_now_iso(),
+            "source": source.clone(),
+            "body": String::from_utf8_lossy(&body_bytes).into_owned(),
+            "body_bytes": body_bytes.len(),
+        }));
+
         if let Ok(obj) = serde_json::from_slice::<Value>(&body_bytes) {
             let added_items = extract_added_from_any_json(&obj);
             if !added_items.is_empty() {

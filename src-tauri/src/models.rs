@@ -86,6 +86,7 @@ pub struct ChestRow {
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AddedItem {
+    #[serde(default)]
     pub at: String,
     #[serde(rename = "itemId", skip_serializing_if = "Option::is_none")]
     pub item_id: Option<i64>,
@@ -155,6 +156,10 @@ pub struct RequestLogEntry {
     pub body_bytes: usize,
     #[serde(default)]
     pub body: String,
+    #[serde(default)]
+    pub response_body: String,
+    #[serde(default)]
+    pub response_body_bytes: usize,
 }
 
 /// Top-level application state, persisted as JSON.
