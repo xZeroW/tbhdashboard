@@ -5342,7 +5342,7 @@ dependencies = [
 
 [[package]]
 name = "tbhdashboard"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5369,14 +5369,14 @@ dependencies = [
 
 [[package]]
 name = "tbhdashboard-nethelper"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "tbhdashboard-ui"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "console_error_panic_hook",
  "gloo-timers",
