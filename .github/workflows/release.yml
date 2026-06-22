@@ -135,35 +135,63 @@ jobs:
         with:
           path: release-artifacts
 
-      - name: Merge platform updater JSONs
-        shell: bash
-        run: |
-          # Merge per-platform latest.json files into a single latest.json
-          shopt -s nullglob
-          jsons=(release-artifacts/*/latest.json)
-          if [[ ${#jsons[@]} -eq 1 ]]; then
-            cp "${jsons[0]}" latest.json
-          elif [[ ${#jsons[@]} -gt 1 ]]; then
-            jq -s '
-              {
-                version: .[0].version,
-                notes: .[0].notes,
-                pub_date: .[0].pub_date,
-                platforms: (reduce .[].platforms as $p ({}; . * $p))
-              }
-            ' "${jsons[@]}" > latest.json
-          fi
-
       - name: Flatten artifacts for release
         shell: bash
         run: |
           mkdir -p release-flat
-          # Copy all files except per-platform latest.json into a flat dir
-          find release-artifacts -type f ! -name latest.json -exec cp -n {} release-flat/ \;
-          # Add merged latest.json instead
-          if [[ -f latest.json ]]; then
-            cp latest.json release-flat/
+          find release-artifacts -type f -exec cp -n {} release-flat/ \;
+
+      - name: Generate updater manifest
+        shell: bash
+        run: |
+          shopt -s nullglob
+          version="${GITHUB_REF_NAME#v}"
+          base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          appimages=(release-flat/*.AppImage)
+          windows_installers=(release-flat/*setup.exe release-flat/*.msi)
+
+          linux_url=""
+          linux_signature=""
+          windows_url=""
+          windows_signature=""
+
+          if [[ ${#appimages[@]} -gt 0 && -f "${appimages[0]}.sig" ]]; then
+            linux_file="$(basename "${appimages[0]}")"
+            linux_url="${base_url}/${linux_file}"
+            linux_signature="$(<"${appimages[0]}.sig")"
           fi
+
+          for installer in "${windows_installers[@]}"; do
+            if [[ -f "${installer}.sig" ]]; then
+              windows_file="$(basename "${installer}")"
+              windows_url="${base_url}/${windows_file}"
+              windows_signature="$(<"${installer}.sig")"
+              break
+            fi
+          done
+
+          jq -n \
+            --arg version "$version" \
+            --arg notes "" \
+            --arg pub_date "$generated_at" \
+            --arg linux_url "$linux_url" \
+            --arg linux_signature "$linux_signature" \
+            --arg windows_url "$windows_url" \
+            --arg windows_signature "$windows_signature" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: (
+                {}
+                + (if $linux_url != "" then {"linux-x86_64": {url: $linux_url, signature: $linux_signature}} else {} end)
+                + (if $windows_url != "" then {"windows-x86_64": {url: $windows_url, signature: $windows_signature}} else {} end)
+              )
+            }' > release-flat/latest.json
+
+          jq -e '.platforms | length > 0' release-flat/latest.json
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
