@@ -32,7 +32,11 @@ pub enum SidecarEvent {
         keys: Vec<String>,
     },
     RequestLogged(RequestLogEntry),
-    ResponseLogged { source: String, body: String, body_bytes: usize },
+    ResponseLogged {
+        source: String,
+        body: String,
+        body_bytes: usize,
+    },
     Unknown,
 }
 
@@ -126,8 +130,16 @@ pub fn parse_sidecar_line(line: &str) -> SidecarEvent {
             .map(SidecarEvent::RequestLogged)
             .unwrap_or(SidecarEvent::Unknown),
         "response_log" => SidecarEvent::ResponseLogged {
-            source: v.get("source").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-            body: v.get("body").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            source: v
+                .get("source")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string(),
+            body: v
+                .get("body")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string(),
             body_bytes: v.get("body_bytes").and_then(|c| c.as_u64()).unwrap_or(0) as usize,
         },
         _ => SidecarEvent::Unknown,
@@ -205,9 +217,18 @@ pub fn apply_sidecar_event(event: SidecarEvent, repo: &StateRepository) {
             repo.add_request_log(&mut state, entry);
             repo.save(&state).unwrap();
         }
-        SidecarEvent::ResponseLogged { source, body, body_bytes } => {
+        SidecarEvent::ResponseLogged {
+            source,
+            body,
+            body_bytes,
+        } => {
             let mut state = repo.load();
-            if let Some(entry) = state.request_history.iter_mut().rev().find(|e| e.source == source) {
+            if let Some(entry) = state
+                .request_history
+                .iter_mut()
+                .rev()
+                .find(|e| e.source == source)
+            {
                 entry.response_body = body;
                 entry.response_body_bytes = body_bytes;
             }

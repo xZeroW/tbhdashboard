@@ -537,6 +537,7 @@ pub async fn invoke_install_update() -> Result<(), String> {
     if result.is_null() {
         Ok(())
     } else {
-        Err(serde_wasm_bindgen::from_value::<String>(result).unwrap_or_else(|_| "Unknown error".to_string()))
+        Err(serde_wasm_bindgen::from_value::<String>(result)
+            .unwrap_or_else(|_| "Unknown error".to_string()))
     }
 }

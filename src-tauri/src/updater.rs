@@ -18,10 +18,17 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
     let mut builder = app.updater_builder();
     if let Some(token) = UPDATER_TOKEN {
         if !token.is_empty() {
-            builder = builder.header("Authorization", &format!("Bearer {token}")).map_err(|e| e.to_string())?;
+            builder = builder
+                .header("Authorization", &format!("Bearer {token}"))
+                .map_err(|e| e.to_string())?;
         }
     }
-    let update = builder.build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    let update = builder
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(update.map(|u| UpdateInfo {
         version: u.version,
         current_version: u.current_version,
@@ -35,10 +42,17 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     let mut builder = app.updater_builder();
     if let Some(token) = UPDATER_TOKEN {
         if !token.is_empty() {
-            builder = builder.header("Authorization", &format!("Bearer {token}")).map_err(|e| e.to_string())?;
+            builder = builder
+                .header("Authorization", &format!("Bearer {token}"))
+                .map_err(|e| e.to_string())?;
         }
     }
-    let update = builder.build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    let update = builder
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
     if let Some(update) = update {
         update
             .download_and_install(

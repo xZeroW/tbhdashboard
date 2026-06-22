@@ -77,7 +77,10 @@ pub fn RequestHistory(tick: ReadSignal<u32>) -> impl IntoView {
 
     let selected = move || {
         let key = selected_key.get()?;
-        requests.get().into_iter().find(|r| format!("{}:{}", r.at, r.source) == key)
+        requests
+            .get()
+            .into_iter()
+            .find(|r| format!("{}:{}", r.at, r.source) == key)
     };
 
     let clear_history = move |_| {
