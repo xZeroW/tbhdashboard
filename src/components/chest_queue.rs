@@ -4,7 +4,14 @@ use crate::app::{
 use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
 
 #[component]
 pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
@@ -13,14 +20,54 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
     let (show_claimable_only, set_show_claimable_only) = signal(false);
     let (show_claimed, set_show_claimed) = signal(false);
     let (freeze_queue, set_freeze_queue) = signal(false);
-    let (rarity_options, set_rarity_options) = signal(Vec::<String>::new());
-    let (filter_cats, set_filter_cats) = signal(HashMap::<String, String>::new());
+    const RARITY_ORDER: [&str; 9] = [
+        "COMMON", "UNCOMMON", "RARE", "LEGENDARY", "ARCANA", "BEYOND",
+        "CELESTIAL", "DIVINE", "COSMIC",
+    ];
+    let category_names: [&str; 7] = [
+        "ARMOR",
+        "BOOTS",
+        "GLOVES",
+        "HELMET",
+        "MAIN_WEAPON",
+        "SUB_WEAPON",
+        "MATERIAL",
+    ];
+    let categories = move || {
+        category_names
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    };
+    let filter_cats_init: HashMap<String, String> = category_names
+        .iter()
+        .map(|c| (c.to_string(), "ALL".to_string()))
+        .collect();
+    let (filter_cats, set_filter_cats) = signal(filter_cats_init);
+
+    let save_filters = move || {
+        let filters = filter_cats.get();
+        log(&format!("[save_filters] saving: {:?}", filters));
+        spawn_local(async move {
+            let mut settings = invoke::invoke_get_settings().await;
+            log(&format!("[save_filters] loaded settings, queue_filters before: {:?}", settings.queue_filters));
+            settings.queue_filters = filters;
+            let ok = invoke::invoke_set_settings(settings).await;
+            log(&format!("[save_filters] save result: {}", ok));
+        });
+    };
 
     Effect::new(move |_| {
         spawn_local(async move {
-            let options = invoke::invoke_get_rarity_order().await;
-            if !options.is_empty() {
-                set_rarity_options.set(options);
+            let settings = invoke::invoke_get_settings().await;
+            log(&format!("[load_filters] loaded: {:?}", settings.queue_filters));
+            if !settings.queue_filters.is_empty() {
+                set_filter_cats.update(|f| {
+                    for (k, v) in &settings.queue_filters {
+                        f.insert(k.clone(), v.clone());
+                    }
+                });
+                log(&format!("[load_filters] applied to signal"));
             }
         });
     });
@@ -47,42 +94,11 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
         fetch_data();
     });
 
-    let categories = move || {
-        let set: BTreeSet<String> = rows
-            .get()
-            .iter()
-            .map(|r| {
-                if r.slot.is_empty() {
-                    r.kind.clone()
-                } else {
-                    r.slot.clone()
-                }
-            })
-            .filter(|s| !s.is_empty())
-            .collect();
-        set.into_iter().collect::<Vec<_>>()
-    };
-
-    Effect::new(move |_| {
-        let cats = categories();
-        let mut filters = filter_cats.get();
-        let mut changed = false;
-        for cat in &cats {
-            if !filters.contains_key(cat) {
-                filters.insert(cat.clone(), "ALL".to_string());
-                changed = true;
-            }
-        }
-        if changed {
-            set_filter_cats.set(filters);
-        }
-    });
-
     let filtered_rows = move || {
         let only_claimable = show_claimable_only.get();
         let show_claimed = show_claimed.get();
         let filters = filter_cats.get();
-        let options = rarity_options.get();
+        let options = &RARITY_ORDER;
         rows.get()
             .into_iter()
             .filter(|r| {
@@ -100,7 +116,7 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                 if filt == "ALL" {
                     return true;
                 }
-                match options.iter().position(|x| x == filt) {
+                match options.iter().position(|x| *x == filt) {
                     Some(min_idx) => options
                         .iter()
                         .position(|x| x == &r.rarity)
@@ -153,15 +169,16 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                 <For each=categories key=|cat| cat.clone() let(cat)>
                     <label>
                         {cat.clone()}
-                        <select on:change=move |ev| {
+                        <select prop:value={let cat = cat.clone(); move || filter_cats.with(|f| f.get(cat.as_str()).cloned().unwrap_or_else(|| "ALL".to_string()))}
+                            on:change=move |ev| {
                             let v = event_target_value(&ev);
                             let c = cat.clone();
                             set_filter_cats.update(|f| { f.insert(c, v); });
+                            save_filters();
                         }>
                             <option value="ALL">"ALL"</option>
-                            {rarity_options.get().into_iter().map(|r| {
-                                let opt = r.clone();
-                                view! { <option value=opt>{r}</option> }
+                            {RARITY_ORDER.iter().copied().map(|r| {
+                                view! { <option value=r>{r}</option> }
                             }).collect::<Vec<_>>()}
                         </select>
                     </label>

@@ -1,6 +1,7 @@
 use crate::invoke;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use std::collections::HashMap;
 
 const ASSET_CHECK_COOLDOWN_SECONDS: u32 = 10 * 60;
 
@@ -25,6 +26,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     let (steam_launch_options, set_steam_launch_options) = signal(String::new());
     let (launch_game_on_start, set_launch_game_on_start) = signal(false);
     let (steam_launch_options_prompted, set_steam_launch_options_prompted) = signal(false);
+    let (queue_filters, _set_queue_filters) = signal(HashMap::<String, String>::new());
 
     let fetch_catalog = move || {
         spawn_local(async move {
@@ -95,6 +97,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
             set_steam_launch_options.set(settings.steam_launch_options);
             set_launch_game_on_start.set(settings.launch_game_on_start);
             set_steam_launch_options_prompted.set(settings.steam_launch_options_prompted);
+            _set_queue_filters.set(settings.queue_filters);
             if asset_status.get_untracked().is_none() {
                 fetch_asset_status();
             }
@@ -134,6 +137,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         launch_game_on_start: launch_game_on_start.get(),
         steam_launch_options_prompted: steam_launch_options_prompted.get(),
         offline_mode: false,
+        queue_filters: queue_filters.get(),
     };
 
     let save_settings = move || {

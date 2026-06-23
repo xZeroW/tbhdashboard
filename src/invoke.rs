@@ -87,6 +87,8 @@ pub struct AppSettings {
     pub share_claimable_rewards: bool,
     #[serde(default)]
     pub offline_mode: bool,
+    #[serde(default)]
+    pub queue_filters: std::collections::HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -243,6 +245,7 @@ impl Default for AppSettings {
             steam_id: String::new(),
             share_claimable_rewards: false,
             offline_mode: false,
+            queue_filters: std::collections::HashMap::new(),
         }
     }
 }
