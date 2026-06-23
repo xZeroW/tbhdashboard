@@ -26,7 +26,7 @@ pub fn box_label(box_id: Option<i64>) -> String {
 }
 
 pub fn normalize_chest(c: &DynamicMap, source: &str) -> Option<ChestRecord> {
-    let item_key = c
+    let mut item_key = c
         .get("itemKey")
         .or_else(|| c.get("item_key"))
         .or_else(|| c.get("inDate"))
@@ -35,7 +35,13 @@ pub fn normalize_chest(c: &DynamicMap, source: &str) -> Option<ChestRecord> {
         .unwrap_or("")
         .to_string();
     if item_key.is_empty() {
-        return None;
+        let id_part = c
+            .get("itemId")
+            .or_else(|| c.get("item_id"))
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        item_key = format!("synth-{}-{}", id_part, utc_now_iso());
     }
 
     Some(ChestRecord {

@@ -266,13 +266,9 @@ impl HttpHandler for TbhHandler {
 
         let is_interesting = is_interesting(&info.host, &info.path);
 
-        if is_interesting {
-            self.source = Some(info.source.clone());
-            self.method = Some(info.method.clone());
-            self.path = Some(info.path.clone());
-        } else {
-            self.clear_tracked_request();
-        }
+        self.source = Some(info.source.clone());
+        self.method = Some(info.method.clone());
+        self.path = Some(info.path.clone());
 
         let content_type = req
             .headers()
@@ -302,7 +298,7 @@ impl HttpHandler for TbhHandler {
             "body": String::from_utf8_lossy(&body_bytes).into_owned(),
         }));
 
-        if should_replay_frozen_queue(&info, self.freeze_queue.load(Ordering::Relaxed)) {
+        if should_replay_frozen_queue(&info, &body_bytes, self.freeze_queue.load(Ordering::Relaxed)) {
             let cached = self.last_queue_response.lock().unwrap().clone();
             if let Some(cached) = cached {
                 eprintln!("[TBH-sidecar] freeze queue replayed: {}", info.source);
@@ -507,11 +503,27 @@ fn cached_queue_response(cached: CachedResponse) -> RequestOrResponse {
     builder.body(Body::from(cached.body)).unwrap().into()
 }
 
-fn should_replay_frozen_queue(info: &RequestInfo, freeze_queue: bool) -> bool {
-    freeze_queue
-        && info.host.contains(TARGET_HOST)
-        && info.method.eq_ignore_ascii_case("POST")
-        && info.path.contains("/backend-function/base/v1")
+fn should_replay_frozen_queue(info: &RequestInfo, body_bytes: &[u8], freeze_queue: bool) -> bool {
+    if !freeze_queue
+        || !info.host.contains(TARGET_HOST)
+        || !info.method.eq_ignore_ascii_case("POST")
+        || !info.path.contains("/backend-function/base/v1")
+    {
+        return false;
+    }
+
+    let Ok(req_json) = serde_json::from_slice::<Value>(body_bytes) else {
+        return false;
+    };
+    let Some(action) = req_json
+        .get("functionBody")
+        .and_then(|v| v.get("body"))
+        .and_then(|v| v.get("action"))
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    action.starts_with("processBox")
 }
 
 fn is_interesting(host: &str, path: &str) -> bool {
@@ -617,6 +629,11 @@ fn extract_chests_from_any_json(obj: &Value) -> Vec<Value> {
                 found.extend(extract_chests_from_any_json(item));
             }
         }
+        Value::String(s) => {
+            if let Ok(parsed) = serde_json::from_str(s) {
+                found.extend(extract_chests_from_any_json(&parsed));
+            }
+        }
         _ => {}
     }
 
@@ -694,6 +711,11 @@ fn extract_added_inner(obj: &Value, found: &mut Vec<Value>) {
         Value::Array(items) => {
             for item in items {
                 extract_added_inner(item, found);
+            }
+        }
+        Value::String(s) => {
+            if let Ok(parsed) = serde_json::from_str(s) {
+                extract_added_inner(&parsed, found);
             }
         }
         _ => {}

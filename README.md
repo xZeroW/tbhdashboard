@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  A live, read-only desktop dashboard for <strong>TaskBarHero</strong> chest queues, rerolls, act boss drops, and farming recommendations.
+  A live, read-only desktop dashboard for <strong>TaskBarHero</strong> chest queues, rerolls, and farming recommendations.
 </p>
 
 ![TaskBarHero Dashboard screenshot](resources/readme-img.jpg)
@@ -22,10 +22,7 @@
 
 * 📦 Tracks Common Treasure Chest and Stage Treasure Chest queues.
 * ⏱️ Shows unlock times, rewards, item keys, rarity totals, and queue statistics.
-* 🔁 Previews reroll-generated queues after entering Act Boss stages.
-* 🎁 Displays Act Boss chest rewards after opening.
 * 🗺️ Ranks stages by selected item rarity using downloaded game data.
-* 🛰️ Starts a local Hudsucker MITM proxy and persists state locally.
 * 🛡️ Runs read-only through captured server responses; it does not modify game memory or packets.
 
 ## 🚀 Quick Start
@@ -65,143 +62,17 @@ Run the app in development:
 cargo tauri dev
 ```
 
-The Tauri app starts the Hudsucker proxy automatically in-process.
-
-### Windows Transparent Capture
-
-Windows does not rely on `HTTP_PROXY` or `HTTPS_PROXY` launch environment variables. The dashboard launches TaskBarHero normally, detects `taskbarhero.exe`, and starts the Windows-only network helper for that game process.
-
-The helper is a Proxifier-style adapter:
-
-* WinDivert captures outbound TCP traffic for the detected TaskBarHero PID, mainly port `443`.
-* The helper preserves the original destination IP and port.
-* Each redirected connection is converted to an HTTP proxy tunnel with `CONNECT original_ip:original_port HTTP/1.1`.
-* Bytes are piped as `game socket <-> helper <-> Hudsucker` after CONNECT succeeds.
-* The helper is stopped when the game exits or when the dashboard exits.
-
-Release builds bundle `tbhdashboard-nethelper.exe`, `WinDivert.dll`, and `WinDivert64.sys`. Users should not need to install Proxifier or copy WinDivert files manually; they only need to approve the helper UAC prompt when capture starts.
-
-For local source builds, build the helper on Windows:
-
-```powershell
-cargo build -p tbhdashboard-nethelper --release --target x86_64-pc-windows-msvc
-```
-
-Place the helper where the dashboard can find it:
-
-```text
-src-tauri/binaries/tbhdashboard-nethelper.exe
-```
-
-For local development, place `tbhdashboard-nethelper.exe` next to `TaskBarHeroDashboard.exe`, under `src-tauri/binaries/`, or set `TBH_NETHELPER` to the full helper path.
-
-WinDivert is required at runtime. Release builds include it. For local development, copy `WinDivert.dll` and `WinDivert64.sys` from a WinDivert 2.x release next to `tbhdashboard-nethelper.exe`. The helper must run with Administrator rights so the WinDivert driver can load. If it cannot start, the dashboard/helper logs explicit messages for missing Administrator rights, missing `WinDivert.dll`, missing `WinDivert64.sys`, or blocked driver loading.
-
-You can run the helper manually for diagnostics:
-
-```powershell
-tbhdashboard-nethelper.exe start --pid <taskbarhero_pid> --proxy 127.0.0.1:8080
-tbhdashboard-nethelper.exe status
-tbhdashboard-nethelper.exe stop
-```
-
-## 🗃️ Game Data Setup
-
-The dashboard needs TaskBarHero data for item names, drop odds, and stage farming calculations. The app checks the hosted asset manifest from Settings and downloads updates directly when needed.
-
-Use Settings -> Catalog -> Check Assets Update to download or refresh game data. On startup, Settings also checks for updates automatically with a short cooldown.
-
-Downloaded data is installed as an `Assets/` folder containing at least:
-
-```text
-Assets/
-  TextAsset/
-    DropInfoData.txt
-    ItemGroupInfoData.txt
-    ItemInfoData.txt
-    MaterialInfoData.txt
-    StageInfoData.txt
-```
-
-By default, assets are stored next to the running executable. For local development or diagnostics, you can override the asset root with `TBH_ASSETS`:
-
-```bash
-TBH_ASSETS=/path/to/Assets cargo tauri dev
-```
-
-After a game patch, use Check Assets Update again. If the hosted manifest URL needs to be changed for development, set `TBH_ASSET_MANIFEST_URL` before starting the app.
-
-## 🎮 Using The Dashboard
-
-Launch TaskBarHero through the dashboard or through your own Steam launch options so the game's HTTPS traffic is routed through the local Hudsucker proxy.
-
-The default proxy URL is:
-
-```text
-http://127.0.0.1:8080
-```
-
-For Steam launch options on Linux, the dashboard can use:
-
-```text
-HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080 ALL_PROXY=http://127.0.0.1:8080 %command%
-```
-
-On Windows, leave Steam launch options empty and use the transparent helper instead.
-
-Once the game starts, the dashboard updates automatically as requests are captured.
-
-The proxy persists its local CA certificate at:
-
-```text
-~/.cache/tbhdashboard/tbh-hudsucker-ca.pem
-```
-
-The game/client must trust this CA certificate before HTTPS response bodies can be inspected.
-
-Runtime state defaults to:
-
-```text
-~/.cache/tbh_dashboard_state.json
-```
-
-Override the state path with `TBH_STATE`:
-
-```bash
-TBH_STATE=/path/to/state.json cargo tauri dev
-```
+The Tauri app starts the proxy automatically in-process.
 
 ## 🧭 Features
 
 ### 📦 Chest Queue
 
-Displays Common Treasure Chests, Stage Treasure Chests, unlock times, rewards, and item keys.
+Displays Common Treasure Chests, Stage Treasure Chests, unlock times, and rewards.
 
-### 📊 Queue Statistics
+When entering an Act Boss stage or switching between stages that would result in a different chest, the game generates a completely new timed chest queue. This tab lets you inspect that generated queue and you can decide whether to keep it or reroll again.
 
-Shows total queue size, claimable chests, waiting chests, and queue totals by rarity.
-
-Example:
-
-```text
-Common       18
-Uncommon     12
-Rare          8
-Legendary     4
-Immortal      3
-Arcana        2
-Beyond        3
-```
-
-### 🔁 Reroll Preview
-
-When entering an Act Boss stage, the game generates a completely new timed chest queue. This tab lets you inspect that generated queue and decide whether to keep it or reroll again.
-
-### 🎁 Act Boss Drop
-
-Displays the actual reward obtained from an Act Boss chest after it is opened.
-
-### 🗺️ Farm Ranking
+### 🗺️ Farm Ranking (WIP)
 
 Displays the best stages to farm for a selected rarity.
 
@@ -218,62 +89,9 @@ Supported rarities:
 * DIVINE
 * COSMIC
 
-### 📜 Events
-
-Shows recent captured dashboard events, proxy status changes, and state updates.
-
 ### ⚙️ Settings
 
-Configures refresh interval, log level, proxy URL, Steam launch options, automatic game launch, and catalog asset updates.
-
-## 🛠️ Developer Notes
-
-### 🧱 Project Structure
-
-The app is a Tauri 2 desktop application with a Leptos WASM frontend, a Rust backend, and an in-process Hudsucker MITM proxy:
-
-* `src/` contains the Leptos frontend and tab components.
-* `src-tauri/src/models.rs` contains typed app data.
-* `src-tauri/src/state.rs` owns JSON persistence through `StateRepository`.
-* `src-tauri/src/catalog.rs` loads downloaded game data and calculates drop odds.
-* `src-tauri/src/chests.rs` contains chest domain logic and row projection.
-* `src-tauri/src/capture.rs` parses proxy capture messages and updates state.
-* `src-tauri/src/commands.rs` exposes Tauri command handlers to the frontend.
-* `src-tauri/src/proxy.rs` starts and manages the in-process Hudsucker proxy.
-
-### ✅ Tests
-
-Run Rust checks and tests:
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-trunk build
-```
-
-### 📦 Build Package
-
-Build the Tauri app locally:
-
-```bash
-cargo tauri build
-```
-
-Build artifacts are written under:
-
-```text
-src-tauri/target/release/bundle/
-```
-
-### 🚢 Release
-
-The release workflow builds Linux and Windows bundles when a version tag is pushed:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+Configures refresh interval, log level, automatic game launch, and catalog asset updates.
 
 ## 🛡️ Disclaimer
 
@@ -281,5 +99,5 @@ git push origin v0.1.0
 * It does not hook into TaskBarHero.
 * It does not read or write TaskBarHero process memory.
 * It does not modify packets or game data.
-* All displayed information comes from data already sent by the game servers and captured through the local Hudsucker proxy.
+* All displayed information comes from data already sent by the game servers and captured through the local proxy.
 * Use at your own risk.
