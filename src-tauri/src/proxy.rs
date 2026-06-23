@@ -707,7 +707,7 @@ fn get_processbox_info(req: &Value) -> Option<Value> {
     }
 
     let body = req.get("functionBody")?.get("body")?.as_object()?;
-    if body.get("action")?.as_str()? != "processBox" {
+    if !body.get("action")?.as_str()?.starts_with("processBox") {
         return None;
     }
 
@@ -798,15 +798,17 @@ fn mark_claimed_from_backend_request(req: &Value) -> Vec<String> {
         .get("action")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let fields: &[&str] = match action {
-        "processBox" => &[
+    let fields: &[&str] = if action.starts_with("processBox") {
+        &[
             "useItemKeyList",
             "useItemKeys",
             "openItemKeyList",
             "boxKeyList",
-        ],
-        "exchange" => &["itemKey", "itemKeys", "useItemKeyList"],
-        _ => &["useItemKeyList", "itemKey", "itemKeys", "openItemKeyList"],
+        ]
+    } else if action == "exchange" {
+        &["itemKey", "itemKeys", "useItemKeyList"]
+    } else {
+        &["useItemKeyList", "itemKey", "itemKeys", "openItemKeyList"]
     };
 
     fields
