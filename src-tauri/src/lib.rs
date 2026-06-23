@@ -41,7 +41,7 @@ pub fn run() {
 
             chests::clear_all(state.repo());
 
-            let mut proxy = ProxyManager::new(state.proxy_status());
+            let mut proxy = ProxyManager::new(state.proxy_status(), state.freeze_queue_state());
             proxy.start(app.handle(), state.repo());
             app.manage(Mutex::new(proxy));
             app.manage(nethelper::NetHelperCleanup);
@@ -60,6 +60,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_proxy_status,
+            commands::get_freeze_queue,
+            commands::set_freeze_queue,
             commands::login,
             commands::register,
             commands::get_activation_status,

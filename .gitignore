@@ -34,3 +34,7 @@ packaging/arch/*.pkg.tar.*
 packaging/arch/*.src.tar.*
 
 AGENTS.md
+opencode.json
+
+# Generated sprite/canvas artifacts from trunk builds
+public/sactx-*.png

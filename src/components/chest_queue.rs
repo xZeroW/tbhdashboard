@@ -12,6 +12,7 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
     let (_summary, set_summary) = signal(HashMap::<String, usize>::new());
     let (show_claimable_only, set_show_claimable_only) = signal(false);
     let (show_claimed, set_show_claimed) = signal(false);
+    let (freeze_queue, set_freeze_queue) = signal(false);
     let (rarity_options, set_rarity_options) = signal(Vec::<String>::new());
     let (filter_cats, set_filter_cats) = signal(HashMap::<String, String>::new());
 
@@ -21,6 +22,12 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
             if !options.is_empty() {
                 set_rarity_options.set(options);
             }
+        });
+    });
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            set_freeze_queue.set(invoke::invoke_get_freeze_queue().await);
         });
     });
 
@@ -121,6 +128,19 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
                 <label class="toggle-switch">
                     <input type="checkbox" prop:checked=show_claimed on:change=move |ev| {
                         set_show_claimed.set(event_target_checked(&ev));
+                    }/>
+                    <span class="slider"></span>
+                </label>
+                <span class="toggle-sep"></span>
+                <span>"Freeze Queue"</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" prop:checked=freeze_queue on:change=move |ev| {
+                        let enabled = event_target_checked(&ev);
+                        set_freeze_queue.set(enabled);
+                        spawn_local(async move {
+                            let applied = invoke::invoke_set_freeze_queue(enabled).await;
+                            set_freeze_queue.set(applied);
+                        });
                     }/>
                     <span class="slider"></span>
                 </label>

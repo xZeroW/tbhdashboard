@@ -258,6 +258,21 @@ pub async fn invoke_get_chest_rows(include_claimed: bool) -> Vec<ChestRow> {
     serde_wasm_bindgen::from_value(result).unwrap_or_default()
 }
 
+pub async fn invoke_get_freeze_queue() -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_freeze_queue", args).await;
+    result.as_bool().unwrap_or(false)
+}
+
+pub async fn invoke_set_freeze_queue(freeze_queue: bool) -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "freezeQueue": freeze_queue
+    }))
+    .unwrap();
+    let result = invoke("set_freeze_queue", args).await;
+    result.as_bool().unwrap_or(false)
+}
+
 pub async fn invoke_get_box_summary() -> std::collections::HashMap<String, usize> {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("get_box_summary", args).await;

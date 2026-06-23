@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 use tauri::Manager;
@@ -24,6 +27,7 @@ pub struct ManagedState {
     repo: StateRepository,
     pub catalog: Mutex<StaticCatalog>,
     proxy_status: Arc<Mutex<ProxyStatus>>,
+    freeze_queue: Arc<AtomicBool>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -161,6 +165,7 @@ impl ManagedState {
             repo,
             catalog: Mutex::new(StaticCatalog::new(catalog_root)),
             proxy_status: Arc::new(Mutex::new(ProxyStatus::starting())),
+            freeze_queue: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -171,6 +176,10 @@ impl ManagedState {
     pub fn proxy_status(&self) -> Arc<Mutex<ProxyStatus>> {
         self.proxy_status.clone()
     }
+
+    pub fn freeze_queue_state(&self) -> Arc<AtomicBool> {
+        self.freeze_queue.clone()
+    }
 }
 
 fn configured_assets_root(repo: &StateRepository) -> Option<PathBuf> {
@@ -180,6 +189,17 @@ fn configured_assets_root(repo: &StateRepository) -> Option<PathBuf> {
 #[tauri::command]
 pub fn get_proxy_status(state: State<'_, ManagedState>) -> ProxyStatus {
     state.proxy_status.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn get_freeze_queue(state: State<'_, ManagedState>) -> bool {
+    state.freeze_queue.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+pub fn set_freeze_queue(state: State<'_, ManagedState>, freeze_queue: bool) -> bool {
+    state.freeze_queue.store(freeze_queue, Ordering::Relaxed);
+    freeze_queue
 }
 
 // ---- Settings ----

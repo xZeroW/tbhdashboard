@@ -7,7 +7,10 @@ use hudsucker::{
     Body, HttpContext, HttpHandler, Proxy, RequestOrResponse,
     certificate_authority::RcgenAuthority,
     decode_response,
-    hyper::{Request, Response, StatusCode, header::HOST},
+    hyper::{
+        Request, Response, StatusCode,
+        header::{CONTENT_TYPE, HOST},
+    },
     rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
         KeyUsagePurpose,
@@ -22,7 +25,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter};
@@ -40,14 +43,18 @@ pub struct ProxyManager {
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     proxy_handle: Option<tauri::async_runtime::JoinHandle<()>>,
     status: Arc<Mutex<ProxyStatus>>,
+    freeze_queue: Arc<AtomicBool>,
+    last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
 }
 
 impl ProxyManager {
-    pub fn new(status: Arc<Mutex<ProxyStatus>>) -> Self {
+    pub fn new(status: Arc<Mutex<ProxyStatus>>, freeze_queue: Arc<AtomicBool>) -> Self {
         Self {
             shutdown_tx: None,
             proxy_handle: None,
             status,
+            freeze_queue,
+            last_queue_response: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -72,8 +79,18 @@ impl ProxyManager {
         let status_handle = self.status.clone();
         let repo_clone = Arc::new(Mutex::new(StateRepository::new(repo.path.clone())));
 
+        let freeze_queue = self.freeze_queue.clone();
+        let last_queue_response = self.last_queue_response.clone();
         let proxy_handle = tauri::async_runtime::spawn(async move {
-            match run_proxy(addr, event_tx, shutdown_rx).await {
+            match run_proxy(
+                addr,
+                event_tx,
+                shutdown_rx,
+                freeze_queue,
+                last_queue_response,
+            )
+            .await
+            {
                 Ok(()) => {
                     println!("[TBH] Proxy shutdown complete");
                     *status_handle.lock().unwrap() = ProxyStatus {
@@ -143,6 +160,8 @@ async fn run_proxy(
     addr: SocketAddr,
     event_tx: mpsc::UnboundedSender<Value>,
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    freeze_queue: Arc<AtomicBool>,
+    last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
 ) -> anyhow::Result<()> {
     let (cert_pem, key_pem, ca_cert_path) = load_or_create_ca(None, None)?;
 
@@ -160,7 +179,7 @@ async fn run_proxy(
         .with_addr(addr)
         .with_ca(ca)
         .with_rustls_connector(provider)
-        .with_http_handler(TbhHandler::new(event_tx))
+        .with_http_handler(TbhHandler::new(event_tx, freeze_queue, last_queue_response))
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         })
@@ -176,21 +195,44 @@ async fn run_proxy(
 #[derive(Clone, Debug)]
 struct TbhHandler {
     source: Option<String>,
+    method: Option<String>,
     path: Option<String>,
     event_tx: mpsc::UnboundedSender<Value>,
+    freeze_queue: Arc<AtomicBool>,
+    last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
+}
+
+#[derive(Clone, Debug)]
+struct CachedResponse {
+    status: StatusCode,
+    content_type: Option<String>,
+    body: Vec<u8>,
 }
 
 impl TbhHandler {
-    fn new(event_tx: mpsc::UnboundedSender<Value>) -> Self {
+    fn new(
+        event_tx: mpsc::UnboundedSender<Value>,
+        freeze_queue: Arc<AtomicBool>,
+        last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
+    ) -> Self {
         Self {
             source: None,
+            method: None,
             path: None,
             event_tx,
+            freeze_queue,
+            last_queue_response,
         }
     }
 
     fn emit(&self, event: Value) {
         let _ = self.event_tx.send(event);
+    }
+
+    fn clear_tracked_request(&mut self) {
+        self.source = None;
+        self.method = None;
+        self.path = None;
     }
 }
 
@@ -201,8 +243,7 @@ impl HttpHandler for TbhHandler {
         req: Request<Body>,
     ) -> RequestOrResponse {
         let Some(info) = RequestInfo::from_request(&req) else {
-            self.source = None;
-            self.path = None;
+            self.clear_tracked_request();
             return req.into();
         };
 
@@ -219,8 +260,7 @@ impl HttpHandler for TbhHandler {
         }
 
         if !info.host.contains(TARGET_HOST) {
-            self.source = None;
-            self.path = None;
+            self.clear_tracked_request();
             return req.into();
         }
 
@@ -228,10 +268,10 @@ impl HttpHandler for TbhHandler {
 
         if is_interesting {
             self.source = Some(info.source.clone());
+            self.method = Some(info.method.clone());
             self.path = Some(info.path.clone());
         } else {
-            self.source = None;
-            self.path = None;
+            self.clear_tracked_request();
         }
 
         let content_type = req
@@ -261,6 +301,20 @@ impl HttpHandler for TbhHandler {
             "bodyBytes": body_bytes.len(),
             "body": String::from_utf8_lossy(&body_bytes).into_owned(),
         }));
+
+        if should_replay_frozen_queue(&info, self.freeze_queue.load(Ordering::Relaxed)) {
+            let cached = self.last_queue_response.lock().unwrap().clone();
+            if let Some(cached) = cached {
+                eprintln!("[TBH-sidecar] freeze queue replayed: {}", info.source);
+                self.clear_tracked_request();
+                return cached_queue_response(cached);
+            }
+
+            eprintln!(
+                "[TBH-sidecar] freeze queue has no cached response, forwarding: {}",
+                info.source
+            );
+        }
 
         if !is_interesting {
             return Request::from_parts(parts, Body::from(body_bytes)).into();
@@ -297,6 +351,7 @@ impl HttpHandler for TbhHandler {
         let Some(source) = self.source.clone() else {
             return res;
         };
+        let method = self.method.clone().unwrap_or_default();
         let path = self.path.clone().unwrap_or_default();
 
         let res = match decode_response(res) {
@@ -311,6 +366,12 @@ impl HttpHandler for TbhHandler {
         };
 
         let (parts, body) = res.into_parts();
+        let status = parts.status;
+        let content_type = parts
+            .headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         let body_bytes = match body.collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(err) => {
@@ -358,6 +419,14 @@ impl HttpHandler for TbhHandler {
                     }));
                 }
             }
+        }
+
+        if method.eq_ignore_ascii_case("POST") && path.contains("/backend-function/base/v1") {
+            *self.last_queue_response.lock().unwrap() = Some(CachedResponse {
+                status,
+                content_type,
+                body: body_bytes.to_vec(),
+            });
         }
 
         Response::from_parts(parts, Body::from(body_bytes))
@@ -428,6 +497,21 @@ fn bad_gateway() -> RequestOrResponse {
         .body(Body::empty())
         .unwrap()
         .into()
+}
+
+fn cached_queue_response(cached: CachedResponse) -> RequestOrResponse {
+    let mut builder = Response::builder().status(cached.status);
+    if let Some(content_type) = cached.content_type {
+        builder = builder.header(CONTENT_TYPE, content_type);
+    }
+    builder.body(Body::from(cached.body)).unwrap().into()
+}
+
+fn should_replay_frozen_queue(info: &RequestInfo, freeze_queue: bool) -> bool {
+    freeze_queue
+        && info.host.contains(TARGET_HOST)
+        && info.method.eq_ignore_ascii_case("POST")
+        && info.path.contains("/backend-function/base/v1")
 }
 
 fn is_interesting(host: &str, path: &str) -> bool {

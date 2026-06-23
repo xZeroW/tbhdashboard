@@ -59,12 +59,7 @@ perl -0pi -e 's/("version"\s*:\s*")[^"]+(")/${1}$ENV{CARGO_VERSION}${2}/' src-ta
 
 cargo metadata --format-version 1 --no-deps >/dev/null
 
-git add \
-  Cargo.toml \
-  Cargo.lock \
-  src-tauri/Cargo.toml \
-  src-tauri/nethelper/Cargo.toml \
-  src-tauri/tauri.conf.json
+git add .
 
 if git diff --cached --quiet; then
   printf 'No release version changes to commit.\n' >&2
