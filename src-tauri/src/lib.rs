@@ -41,12 +41,29 @@ pub fn run() {
 
             chests::clear_all(state.repo());
 
-            let mut proxy = ProxyManager::new(state.proxy_status(), state.freeze_queue_state());
-            proxy.start(app.handle(), state.repo());
+            let settings = state.repo().load().settings;
+
+            if let Some(id) = settings.force_drop_item_id {
+                *state.force_drop_item_id().lock().unwrap() = Some(id);
+            }
+
+            let mut proxy = ProxyManager::new(
+                state.proxy_status(),
+                state.freeze_queue_state(),
+                state.force_drop_item_id(),
+            );
+            if settings.use_system_proxy {
+                *state.proxy_status().lock().unwrap() = commands::ProxyStatus {
+                    running: true,
+                    state: "system".to_string(),
+                    message: "Using system mitmproxy".to_string(),
+                };
+            } else {
+                commands::kill_mitmproxy_processes();
+                proxy.start(app.handle(), state.repo());
+            }
             app.manage(Mutex::new(proxy));
             app.manage(nethelper::NetHelperCleanup);
-
-            let settings = state.repo().load().settings;
             if settings.launch_game_on_start && commands::launch_game_from_settings(&settings).ok {
                 let repo_path = state.repo().path.clone();
                 let app_handle = app.handle().clone();
@@ -92,6 +109,12 @@ pub fn run() {
             commands::upload_claimable_reward_observations,
             commands::browse_assets_folder,
             commands::skip_login,
+            commands::get_system_proxy_status,
+            commands::start_system_proxy,
+            commands::stop_system_proxy,
+            commands::get_force_drop_item_id,
+            commands::set_force_drop_item_id,
+            commands::restart_game,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

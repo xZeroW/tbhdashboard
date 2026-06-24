@@ -88,6 +88,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub offline_mode: bool,
     #[serde(default)]
+    pub use_system_proxy: bool,
+    #[serde(default)]
     pub queue_filters: std::collections::HashMap<String, String>,
 }
 
@@ -245,6 +247,7 @@ impl Default for AppSettings {
             steam_id: String::new(),
             share_claimable_rewards: false,
             offline_mode: false,
+            use_system_proxy: false,
             queue_filters: std::collections::HashMap::new(),
         }
     }
@@ -530,4 +533,70 @@ pub async fn invoke_clear_request_history() -> bool {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     let result = invoke("clear_request_history", args).await;
     result.as_bool().unwrap_or(false)
+}
+
+// ---- System Proxy ----
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemProxyStatus {
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub message: String,
+}
+
+pub async fn invoke_get_system_proxy_status() -> SystemProxyStatus {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_system_proxy_status", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(SystemProxyStatus {
+        running: false,
+        pid: None,
+        message: "Failed to check status".to_string(),
+    })
+}
+
+pub async fn invoke_start_system_proxy() -> SystemProxyStatus {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("start_system_proxy", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(SystemProxyStatus {
+        running: false,
+        pid: None,
+        message: "Failed to start proxy".to_string(),
+    })
+}
+
+pub async fn invoke_stop_system_proxy() -> SystemProxyStatus {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("stop_system_proxy", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(SystemProxyStatus {
+        running: false,
+        pid: None,
+        message: "Failed to stop proxy".to_string(),
+    })
+}
+
+// ---- Force Drop ----
+
+pub async fn invoke_get_force_drop_item_id() -> Option<i64> {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_force_drop_item_id", args).await;
+    serde_wasm_bindgen::from_value(result).ok().flatten()
+}
+
+pub async fn invoke_set_force_drop_item_id(id: Option<i64>) -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "id": id
+    }))
+    .unwrap();
+    let result = invoke("set_force_drop_item_id", args).await;
+    result.as_bool().unwrap_or(false)
+}
+
+pub async fn invoke_restart_game() -> LaunchGameResult {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("restart_game", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(LaunchGameResult {
+        ok: false,
+        message: "Failed to restart game".to_string(),
+    })
 }

@@ -28,6 +28,8 @@ pub struct ManagedState {
     pub catalog: Mutex<StaticCatalog>,
     proxy_status: Arc<Mutex<ProxyStatus>>,
     freeze_queue: Arc<AtomicBool>,
+    system_proxy: Arc<Mutex<Option<std::process::Child>>>,
+    force_drop_item_id: Arc<Mutex<Option<i64>>>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -166,6 +168,8 @@ impl ManagedState {
             catalog: Mutex::new(StaticCatalog::new(catalog_root)),
             proxy_status: Arc::new(Mutex::new(ProxyStatus::starting())),
             freeze_queue: Arc::new(AtomicBool::new(false)),
+            system_proxy: Arc::new(Mutex::new(None)),
+            force_drop_item_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -179,6 +183,10 @@ impl ManagedState {
 
     pub fn freeze_queue_state(&self) -> Arc<AtomicBool> {
         self.freeze_queue.clone()
+    }
+
+    pub fn force_drop_item_id(&self) -> Arc<Mutex<Option<i64>>> {
+        self.force_drop_item_id.clone()
     }
 }
 
@@ -202,6 +210,180 @@ pub fn set_freeze_queue(state: State<'_, ManagedState>, freeze_queue: bool) -> b
     freeze_queue
 }
 
+// ---- System Proxy Management ----
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemProxyStatus {
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub message: String,
+}
+
+#[tauri::command]
+pub fn get_system_proxy_status(state: State<'_, ManagedState>) -> SystemProxyStatus {
+    let mut guard = state.system_proxy.lock().unwrap();
+    if let Some(ref mut child) = *guard {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                *guard = None;
+                SystemProxyStatus {
+                    running: false,
+                    pid: None,
+                    message: "Proxy exited".to_string(),
+                }
+            }
+            Ok(None) => SystemProxyStatus {
+                running: true,
+                pid: child.id().into(),
+                message: "Running".to_string(),
+            },
+            Err(e) => SystemProxyStatus {
+                running: false,
+                pid: None,
+                message: format!("Error checking proxy: {e}"),
+            },
+        }
+    } else {
+        SystemProxyStatus {
+            running: false,
+            pid: None,
+            message: "Not started".to_string(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
+    let mut guard = state.system_proxy.lock().unwrap();
+    if let Some(ref mut child) = *guard
+        && child.try_wait().ok().flatten().is_none()
+    {
+        return SystemProxyStatus {
+            running: true,
+            pid: child.id().into(),
+            message: "Already running".to_string(),
+        };
+    }
+
+    let settings = state.repo().load().settings;
+    let proxy_url = settings.proxy_url.trim().to_string();
+    let port = proxy_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split(':')
+        .nth(1)
+        .and_then(|p| p.trim().parse::<u16>().ok())
+        .unwrap_or(8080);
+
+    let cmd = detect_mitmproxy_binary();
+    let cmd_name = match &cmd {
+        Some((name, _)) => name.clone(),
+        None => {
+            return SystemProxyStatus {
+                running: false,
+                pid: None,
+                message: "mitmproxy not found — install mitmproxy or mitmweb".to_string(),
+            };
+        }
+    };
+
+    let child = match std::process::Command::new(&cmd_name)
+        .args([
+            "--listen-port",
+            &port.to_string(),
+            "--set",
+            "block_global=false",
+            "--web-host",
+            "127.0.0.1",
+        ])
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return SystemProxyStatus {
+                running: false,
+                pid: None,
+                message: format!("Failed to start {cmd_name}: {e}"),
+            };
+        }
+    };
+
+    let pid = child.id();
+    *guard = Some(child);
+
+    *state.proxy_status().lock().unwrap() = ProxyStatus {
+        running: true,
+        state: "system".to_string(),
+        message: format!("Using system {cmd_name} (PID {pid})"),
+    };
+
+    SystemProxyStatus {
+        running: true,
+        pid: Some(pid),
+        message: format!("Started {cmd_name} on port {port}"),
+    }
+}
+
+#[tauri::command]
+pub fn stop_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
+    let mut guard = state.system_proxy.lock().unwrap();
+    if let Some(mut child) = guard.take() {
+        let pid = child.id();
+        let _ = child.kill();
+        let _ = child.wait();
+        kill_mitmproxy_processes();
+        SystemProxyStatus {
+            running: false,
+            pid: Some(pid),
+            message: format!("Stopped proxy (PID {pid})"),
+        }
+    } else {
+        kill_mitmproxy_processes();
+        SystemProxyStatus {
+            running: false,
+            pid: None,
+            message: "Not running".to_string(),
+        }
+    }
+}
+
+fn detect_mitmproxy_binary() -> Option<(String, String)> {
+    for name in &["mitmweb", "mitmproxy", "mitmdump"] {
+        if std::process::Command::new(name)
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
+            let display = match *name {
+                "mitmweb" => "mitmproxy (web UI)",
+                "mitmproxy" => "mitmproxy (terminal)",
+                _ => "mitmdump",
+            };
+            return Some((name.to_string(), display.to_string()));
+        }
+    }
+    None
+}
+
+// ---- Force Drop ----
+
+#[tauri::command]
+pub fn get_force_drop_item_id(state: State<'_, ManagedState>) -> Option<i64> {
+    *state.force_drop_item_id.lock().unwrap()
+}
+
+#[tauri::command]
+pub fn set_force_drop_item_id(state: State<'_, ManagedState>, id: Option<i64>) -> bool {
+    let mut state_data = state.repo().load();
+    state_data.settings.force_drop_item_id = id;
+    if state.repo().save(&state_data).is_err() {
+        return false;
+    }
+    *state.force_drop_item_id.lock().unwrap() = id;
+    true
+}
+
 // ---- Settings ----
 
 #[tauri::command]
@@ -210,10 +392,47 @@ pub fn get_settings(state: State<'_, ManagedState>) -> AppSettings {
 }
 
 #[tauri::command]
-pub fn set_settings(state: State<'_, ManagedState>, settings: AppSettings) -> bool {
+pub fn set_settings(
+    app: tauri::AppHandle,
+    state: State<'_, ManagedState>,
+    settings: AppSettings,
+) -> bool {
+    let old_settings = state.repo().load().settings;
+    let new_settings = normalize_settings(settings);
     let mut state_data = state.repo().load();
-    state_data.settings = normalize_settings(settings);
-    state.repo().save(&state_data).is_ok()
+    state_data.settings = new_settings.clone();
+    if state.repo().save(&state_data).is_err() {
+        return false;
+    }
+
+    if old_settings.use_system_proxy != new_settings.use_system_proxy {
+        if new_settings.use_system_proxy {
+            app.state::<Mutex<crate::proxy::ProxyManager>>()
+                .lock()
+                .unwrap()
+                .stop();
+            *state.proxy_status().lock().unwrap() = ProxyStatus {
+                running: true,
+                state: "system".to_string(),
+                message: "Using system mitmproxy".to_string(),
+            };
+        } else {
+            let mut system_proxy = state.system_proxy.lock().unwrap();
+            if let Some(mut child) = system_proxy.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            drop(system_proxy);
+            kill_mitmproxy_processes();
+            let repo_path = state.repo().path.clone();
+            app.state::<Mutex<crate::proxy::ProxyManager>>()
+                .lock()
+                .unwrap()
+                .start(&app, &crate::state::StateRepository::new(repo_path));
+        }
+    }
+
+    true
 }
 
 #[tauri::command]
@@ -962,6 +1181,55 @@ pub async fn browse_assets_folder(window: tauri::Window) -> Option<String> {
     path.into_path()
         .ok()
         .map(|p| p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn restart_game(app: tauri::AppHandle, state: State<'_, ManagedState>) -> LaunchGameResult {
+    kill_game_process();
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    chests::clear_all(state.repo());
+    let settings = state.repo().load().settings;
+    let result = launch_game_from_settings(&settings);
+    if result.ok {
+        let repo_path = state.repo().path.clone();
+        let proxy_url = settings.proxy_url.clone();
+        std::thread::spawn(move || {
+            monitor_game_process(repo_path, app, proxy_url);
+        });
+    }
+    result
+}
+
+fn kill_game_process() {
+    let names = ["TaskbarHero", "Task Bar Hero"];
+    #[cfg(target_os = "windows")]
+    for name in &names {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", &format!("{}.exe", name)])
+            .output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    for name in &names {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "-i", name])
+            .output();
+    }
+}
+
+pub fn kill_mitmproxy_processes() {
+    let names = ["mitmweb", "mitmproxy", "mitmdump"];
+    #[cfg(target_os = "windows")]
+    for name in &names {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", &format!("{}.exe", name)])
+            .output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    for name in &names {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "-i", name])
+            .output();
+    }
 }
 
 pub fn monitor_game_process(repo_path: PathBuf, app: tauri::AppHandle, proxy_url: String) {

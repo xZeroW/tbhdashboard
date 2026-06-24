@@ -9,7 +9,7 @@ use hudsucker::{
     decode_response,
     hyper::{
         Request, Response, StatusCode,
-        header::{CONTENT_TYPE, HOST},
+        header::{CONTENT_LENGTH, CONTENT_TYPE, HOST},
     },
     rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
@@ -45,16 +45,22 @@ pub struct ProxyManager {
     status: Arc<Mutex<ProxyStatus>>,
     freeze_queue: Arc<AtomicBool>,
     last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
+    force_drop_item_id: Arc<Mutex<Option<i64>>>,
 }
 
 impl ProxyManager {
-    pub fn new(status: Arc<Mutex<ProxyStatus>>, freeze_queue: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        status: Arc<Mutex<ProxyStatus>>,
+        freeze_queue: Arc<AtomicBool>,
+        force_drop_item_id: Arc<Mutex<Option<i64>>>,
+    ) -> Self {
         Self {
             shutdown_tx: None,
             proxy_handle: None,
             status,
             freeze_queue,
             last_queue_response: Arc::new(Mutex::new(None)),
+            force_drop_item_id,
         }
     }
 
@@ -81,6 +87,7 @@ impl ProxyManager {
 
         let freeze_queue = self.freeze_queue.clone();
         let last_queue_response = self.last_queue_response.clone();
+        let force_drop_item_id = self.force_drop_item_id.clone();
         let proxy_handle = tauri::async_runtime::spawn(async move {
             match run_proxy(
                 addr,
@@ -88,6 +95,7 @@ impl ProxyManager {
                 shutdown_rx,
                 freeze_queue,
                 last_queue_response,
+                force_drop_item_id,
             )
             .await
             {
@@ -162,6 +170,7 @@ async fn run_proxy(
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
     freeze_queue: Arc<AtomicBool>,
     last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
+    force_drop_item_id: Arc<Mutex<Option<i64>>>,
 ) -> anyhow::Result<()> {
     let (cert_pem, key_pem, ca_cert_path) = load_or_create_ca(None, None)?;
 
@@ -179,7 +188,12 @@ async fn run_proxy(
         .with_addr(addr)
         .with_ca(ca)
         .with_rustls_connector(provider)
-        .with_http_handler(TbhHandler::new(event_tx, freeze_queue, last_queue_response))
+        .with_http_handler(TbhHandler::new(
+            event_tx,
+            freeze_queue,
+            last_queue_response,
+            force_drop_item_id,
+        ))
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         })
@@ -200,6 +214,7 @@ struct TbhHandler {
     event_tx: mpsc::UnboundedSender<Value>,
     freeze_queue: Arc<AtomicBool>,
     last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
+    force_drop_item_id: Arc<Mutex<Option<i64>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -214,6 +229,7 @@ impl TbhHandler {
         event_tx: mpsc::UnboundedSender<Value>,
         freeze_queue: Arc<AtomicBool>,
         last_queue_response: Arc<Mutex<Option<CachedResponse>>>,
+        force_drop_item_id: Arc<Mutex<Option<i64>>>,
     ) -> Self {
         Self {
             source: None,
@@ -222,6 +238,7 @@ impl TbhHandler {
             event_tx,
             freeze_queue,
             last_queue_response,
+            force_drop_item_id,
         }
     }
 
@@ -272,7 +289,7 @@ impl HttpHandler for TbhHandler {
 
         let content_type = req
             .headers()
-            .get(hudsucker::hyper::header::CONTENT_TYPE)
+            .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
             .to_string();
@@ -298,7 +315,11 @@ impl HttpHandler for TbhHandler {
             "body": String::from_utf8_lossy(&body_bytes).into_owned(),
         }));
 
-        if should_replay_frozen_queue(&info, &body_bytes, self.freeze_queue.load(Ordering::Relaxed)) {
+        if should_replay_frozen_queue(
+            &info,
+            &body_bytes,
+            self.freeze_queue.load(Ordering::Relaxed),
+        ) {
             let cached = self.last_queue_response.lock().unwrap().clone();
             if let Some(cached) = cached {
                 eprintln!("[TBH-sidecar] freeze queue replayed: {}", info.source);
@@ -384,8 +405,8 @@ impl HttpHandler for TbhHandler {
             "body_bytes": body_bytes.len(),
         }));
 
-        if let Ok(obj) = serde_json::from_slice::<Value>(&body_bytes) {
-            let added_items = extract_added_from_any_json(&obj);
+        if let Ok(ref mut obj) = serde_json::from_slice::<Value>(&body_bytes) {
+            let added_items = extract_added_from_any_json(obj);
             if !added_items.is_empty() {
                 self.emit(json!({
                     "type": "added_items",
@@ -395,7 +416,7 @@ impl HttpHandler for TbhHandler {
                 }));
             }
 
-            let chests = extract_chests_from_any_json(&obj);
+            let chests = extract_chests_from_any_json(obj);
             if !chests.is_empty() {
                 if chests.len() >= 40 || path.contains("UserInventory") {
                     self.emit(json!({
@@ -417,6 +438,24 @@ impl HttpHandler for TbhHandler {
             }
         }
 
+        // Force drop: rewrite rewardItemId in claimed boxes
+        let body_bytes = {
+            let force_id = *self.force_drop_item_id.lock().unwrap();
+            if let Some(target_id) = force_id {
+                if let Ok(mut obj) = serde_json::from_slice::<Value>(&body_bytes) {
+                    if modify_force_drop(&mut obj, target_id) {
+                        serde_json::to_vec(&obj).unwrap_or(body_bytes.to_vec())
+                    } else {
+                        body_bytes.to_vec()
+                    }
+                } else {
+                    body_bytes.to_vec()
+                }
+            } else {
+                body_bytes.to_vec()
+            }
+        };
+
         if method.eq_ignore_ascii_case("POST") && path.contains("/backend-function/base/v1") {
             *self.last_queue_response.lock().unwrap() = Some(CachedResponse {
                 status,
@@ -425,7 +464,12 @@ impl HttpHandler for TbhHandler {
             });
         }
 
-        Response::from_parts(parts, Body::from(body_bytes))
+        let mut res_parts = parts;
+        res_parts
+            .headers
+            .insert(CONTENT_LENGTH, body_bytes.len().into());
+
+        Response::from_parts(res_parts, Body::from(body_bytes))
     }
 
     async fn should_intercept(&mut self, _ctx: &HttpContext, req: &Request<Body>) -> bool {
@@ -910,6 +954,76 @@ fn load_or_create_ca(
     })?;
 
     Ok((cert_pem, key_pem, cert_path))
+}
+
+fn modify_force_drop(obj: &mut Value, target_id: i64) -> bool {
+    let mut modified = false;
+    modify_force_drop_inner(obj, target_id, &mut modified);
+    modified
+}
+
+fn modify_force_drop_inner(obj: &mut Value, target_id: i64, modified: &mut bool) {
+    match obj {
+        Value::Object(map) => {
+            if let Some(Value::String(result)) = map.get("result")
+                && let Ok(parsed) = serde_json::from_str::<Value>(result)
+            {
+                let mut parsed = parsed;
+                modify_force_drop_inner(&mut parsed, target_id, modified);
+                if *modified {
+                    map.insert(
+                        "result".to_string(),
+                        Value::String(serde_json::to_string(&parsed).unwrap_or_default()),
+                    );
+                }
+            }
+
+            if let Some(Value::Object(data)) = map.get_mut("data")
+                && let Some(Value::Array(boxes)) = data.get_mut("boxes")
+            {
+                for box_val in boxes.iter_mut() {
+                    if let Some(box_obj) = box_val.as_object_mut() {
+                        let is_get = box_obj.get("isGet").and_then(|v| {
+                            if v.as_bool() == Some(true) || v.as_str() == Some("true") {
+                                Some(true)
+                            } else {
+                                None
+                            }
+                        });
+                        if is_get == Some(true) {
+                            box_obj.insert(
+                                "rewardItemId".to_string(),
+                                Value::Number(serde_json::Number::from(target_id)),
+                            );
+                            *modified = true;
+                        }
+                    }
+                }
+            }
+
+            static SKIP: [&str; 2] = ["result", "data"];
+            for (key, value) in map.iter_mut() {
+                if !SKIP.contains(&key.as_str()) && (value.is_object() || value.is_array()) {
+                    modify_force_drop_inner(value, target_id, modified);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                modify_force_drop_inner(item, target_id, modified);
+            }
+        }
+        Value::String(s) => {
+            if let Ok(parsed) = serde_json::from_str(s) {
+                let mut parsed = parsed;
+                modify_force_drop_inner(&mut parsed, target_id, modified);
+                if *modified {
+                    *s = serde_json::to_string(&parsed).unwrap_or_default();
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn default_ca_cert_path() -> PathBuf {

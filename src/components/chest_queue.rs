@@ -20,9 +20,17 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
     let (show_claimable_only, set_show_claimable_only) = signal(false);
     let (show_claimed, set_show_claimed) = signal(false);
     let (freeze_queue, set_freeze_queue) = signal(false);
-    const RARITY_ORDER: [&str; 9] = [
-        "COMMON", "UNCOMMON", "RARE", "LEGENDARY", "ARCANA", "BEYOND",
-        "CELESTIAL", "DIVINE", "COSMIC",
+    const RARITY_ORDER: [&str; 10] = [
+        "COMMON",
+        "UNCOMMON",
+        "RARE",
+        "LEGENDARY",
+        "IMMORTAL",
+        "ARCANA",
+        "BEYOND",
+        "CELESTIAL",
+        "DIVINE",
+        "COSMIC",
     ];
     let category_names: [&str; 7] = [
         "ARMOR",
@@ -50,7 +58,10 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
         log(&format!("[save_filters] saving: {:?}", filters));
         spawn_local(async move {
             let mut settings = invoke::invoke_get_settings().await;
-            log(&format!("[save_filters] loaded settings, queue_filters before: {:?}", settings.queue_filters));
+            log(&format!(
+                "[save_filters] loaded settings, queue_filters before: {:?}",
+                settings.queue_filters
+            ));
             settings.queue_filters = filters;
             let ok = invoke::invoke_set_settings(settings).await;
             log(&format!("[save_filters] save result: {}", ok));
@@ -60,14 +71,17 @@ pub fn ChestQueue(tick: ReadSignal<u32>) -> impl IntoView {
     Effect::new(move |_| {
         spawn_local(async move {
             let settings = invoke::invoke_get_settings().await;
-            log(&format!("[load_filters] loaded: {:?}", settings.queue_filters));
+            log(&format!(
+                "[load_filters] loaded: {:?}",
+                settings.queue_filters
+            ));
             if !settings.queue_filters.is_empty() {
                 set_filter_cats.update(|f| {
                     for (k, v) in &settings.queue_filters {
                         f.insert(k.clone(), v.clone());
                     }
                 });
-                log(&format!("[load_filters] applied to signal"));
+                log("[load_filters] applied to signal");
             }
         });
     });

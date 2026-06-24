@@ -26,7 +26,21 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     let (steam_launch_options, set_steam_launch_options) = signal(String::new());
     let (launch_game_on_start, set_launch_game_on_start) = signal(false);
     let (steam_launch_options_prompted, set_steam_launch_options_prompted) = signal(false);
+    let (use_system_proxy, set_use_system_proxy) = signal(false);
+    let (sysproxy_status, set_sysproxy_status) = signal(invoke::SystemProxyStatus {
+        running: false,
+        pid: None,
+        message: "Checking...".to_string(),
+    });
+    let (sysproxy_loading, set_sysproxy_loading) = signal(false);
     let (queue_filters, _set_queue_filters) = signal(HashMap::<String, String>::new());
+
+    let fetch_sysproxy_status = move || {
+        spawn_local(async move {
+            let status = invoke::invoke_get_system_proxy_status().await;
+            set_sysproxy_status.set(status);
+        });
+    };
 
     let fetch_catalog = move || {
         spawn_local(async move {
@@ -80,6 +94,9 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     Effect::new(move |_| {
         tick.get();
         fetch_catalog();
+        if use_system_proxy.get() {
+            fetch_sysproxy_status();
+        }
     });
 
     Effect::new(move |_| {
@@ -97,7 +114,9 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
             set_steam_launch_options.set(settings.steam_launch_options);
             set_launch_game_on_start.set(settings.launch_game_on_start);
             set_steam_launch_options_prompted.set(settings.steam_launch_options_prompted);
+            set_use_system_proxy.set(settings.use_system_proxy);
             _set_queue_filters.set(settings.queue_filters);
+            fetch_sysproxy_status();
             if asset_status.get_untracked().is_none() {
                 fetch_asset_status();
             }
@@ -136,8 +155,25 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         steam_launch_options: steam_launch_options.get(),
         launch_game_on_start: launch_game_on_start.get(),
         steam_launch_options_prompted: steam_launch_options_prompted.get(),
+        use_system_proxy: use_system_proxy.get(),
         offline_mode: false,
         queue_filters: queue_filters.get(),
+    };
+
+    let toggle_system_proxy = move || {
+        if sysproxy_loading.get() {
+            return;
+        }
+        set_sysproxy_loading.set(true);
+        spawn_local(async move {
+            let status = if sysproxy_status.get_untracked().running {
+                invoke::invoke_stop_system_proxy().await
+            } else {
+                invoke::invoke_start_system_proxy().await
+            };
+            set_sysproxy_status.set(status);
+            set_sysproxy_loading.set(false);
+        });
     };
 
     let save_settings = move || {
@@ -180,6 +216,67 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
                         <option value="trace">"Trace"</option>
                     </select>
                 </div>
+
+                <div class="settings-row">
+                    <label class="settings-label">"Use system mitmproxy"</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" prop:checked=use_system_proxy
+                            on:change=move |ev| {
+                                set_use_system_proxy.set(event_target_checked(&ev));
+                                save_settings();
+                            }
+                        />
+                        <span class="slider"></span>
+                    </label>
+                    <span class="settings-hint">"Disables embedded proxy. Applies immediately."</span>
+                </div>
+
+                {move || use_system_proxy.get().then(|| view! {
+                    <>
+                        <div class="settings-row">
+                            <label class="settings-label">"System proxy status"</label>
+                            <span class="settings-value">
+                                {move || {
+                                    let s = sysproxy_status.get();
+                                    if s.running {
+                                        view! {
+                                            <span class="pill green">
+                                                <span class="pill-dot">"\u{25cf}"</span>
+                                                { format!(" Running (PID {})", s.pid.unwrap_or(0)) }
+                                            </span>
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <span class="pill gray">
+                                                <span class="pill-dot">"\u{25cf}"</span>
+                                                " Stopped"
+                                            </span>
+                                        }.into_any()
+                                    }
+                                }}
+                            </span>
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label"></label>
+                            <button class="btn-action" disabled=move || sysproxy_loading.get()
+                                on:click=move |_| toggle_system_proxy()
+                            >
+                                {move || {
+                                    if sysproxy_loading.get() {
+                                        "Working..."
+                                    } else if sysproxy_status.get().running {
+                                        "Stop System Proxy"
+                                    } else {
+                                        "Start mitmproxy (web UI)"
+                                    }
+                                }}
+                            </button>
+                            <span class="settings-hint">
+                                {move || if !sysproxy_status.get().message.is_empty() { sysproxy_status.get().message } else { String::new() }}
+                            </span>
+                        </div>
+                    </>
+                })}
             </div>
 
             <div class="settings-section">

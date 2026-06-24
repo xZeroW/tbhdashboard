@@ -134,6 +134,7 @@ pub enum Tab {
     ChestQueue,
     RerollPreview,
     FarmRanking,
+    ForceDrop,
     Requests,
     Settings,
 }
@@ -142,17 +143,10 @@ const TAB_DEFS: &[(Tab, &str, &str, bool)] = &[
     (Tab::ChestQueue, "Queue", "\u{1f4e6}", false),
     (Tab::RerollPreview, "Reroll", "\u{1f3b2}", true),
     (Tab::FarmRanking, "Farming", "\u{1f33e}", false),
+    (Tab::ForceDrop, "Force Drop", "\u{1f4a5}", false),
     (Tab::Requests, "Requests", "\u{1f50e}", false),
     (Tab::Settings, "Settings", "\u{1f527}", false),
 ];
-
-fn tab_title(tab: &Tab) -> &'static str {
-    TAB_DEFS
-        .iter()
-        .find(|(t, _, _, _)| *t == *tab)
-        .map(|(_, l, _, _)| *l)
-        .unwrap_or("")
-}
 
 fn cs(classes: &str) -> String {
     classes.to_string()
@@ -671,7 +665,6 @@ fn Dashboard(
         });
     });
 
-    let _view_title = move || tab_title(&active_tab.get());
     let common_chests = move || {
         chest_rows
             .get()
@@ -902,6 +895,9 @@ fn Dashboard(
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::FarmRanking { "block" } else { "none" }}>
                         <components::farm_ranking::FarmRanking tick/>
+                    </div>
+                    <div style:display={move || if active_tab.get() == Tab::ForceDrop { "block" } else { "none" }}>
+                        <components::force_drop::ForceDrop tick/>
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::Requests { "block" } else { "none" }}>
                         <components::requests::RequestHistory tick/>
