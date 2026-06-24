@@ -283,6 +283,16 @@ impl HttpHandler for TbhHandler {
 
         let is_interesting = is_interesting(&info.host, &info.path);
 
+        if info.path.contains("/data/gameLog/v2/TemperedItem") {
+            self.clear_tracked_request();
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap()
+                .into();
+        }
+
         self.source = Some(info.source.clone());
         self.method = Some(info.method.clone());
         self.path = Some(info.path.clone());
