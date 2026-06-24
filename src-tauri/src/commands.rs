@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::Duration;
 
@@ -27,6 +27,28 @@ use crate::state::StateRepository;
 const STEAM_APP_ID: &str = "3678970";
 const SYSTEM_PROXY_EVENT_PORT: u16 = 1421;
 
+pub struct SpeedhackState {
+    pub enabled: Arc<AtomicBool>,
+    pub multiplier: Arc<Mutex<f32>>,
+    pub game_running: Arc<AtomicBool>,
+    pub addresses_found: Arc<AtomicUsize>,
+    pub last_write_ok: Arc<AtomicBool>,
+    pub last_verify_ok: Arc<AtomicBool>,
+}
+
+impl SpeedhackState {
+    pub fn new() -> Self {
+        Self {
+            enabled: Arc::new(AtomicBool::new(false)),
+            multiplier: Arc::new(Mutex::new(2.0)),
+            game_running: Arc::new(AtomicBool::new(false)),
+            addresses_found: Arc::new(AtomicUsize::new(0)),
+            last_write_ok: Arc::new(AtomicBool::new(false)),
+            last_verify_ok: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
 /// Shared app state managed by Tauri.
 pub struct ManagedState {
     repo: StateRepository,
@@ -36,6 +58,7 @@ pub struct ManagedState {
     system_proxy: Arc<Mutex<Option<std::process::Child>>>,
     system_proxy_running: Arc<AtomicBool>,
     force_drop_item_id: Arc<Mutex<Option<i64>>>,
+    pub speedhack: SpeedhackState,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -177,6 +200,7 @@ impl ManagedState {
             system_proxy: Arc::new(Mutex::new(None)),
             system_proxy_running: Arc::new(AtomicBool::new(false)),
             force_drop_item_id: Arc::new(Mutex::new(None)),
+            speedhack: SpeedhackState::new(),
         }
     }
 
@@ -194,6 +218,10 @@ impl ManagedState {
 
     pub fn force_drop_item_id(&self) -> Arc<Mutex<Option<i64>>> {
         self.force_drop_item_id.clone()
+    }
+
+    pub fn speedhack_state(&self) -> &SpeedhackState {
+        &self.speedhack
     }
 }
 
@@ -500,7 +528,7 @@ pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
 
     let mut command = Command::new(&cmd_name);
     command.arg("--listen-port");
-    command.arg(&port.to_string());
+    command.arg(port.to_string());
     command.args(["--set", "block_global=false"]);
     if cmd_name == "mitmweb" {
         command.args(["--web-host", "127.0.0.1"]);
@@ -591,6 +619,56 @@ pub fn set_force_drop_item_id(state: State<'_, ManagedState>, id: Option<i64>) -
     }
     *state.force_drop_item_id.lock().unwrap() = id;
     true
+}
+
+// ---- Speedhack ----
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedhackStatus {
+    pub enabled: bool,
+    pub multiplier: f32,
+    pub game_running: bool,
+    pub addresses_found: usize,
+    pub last_write_ok: bool,
+    pub last_verify_ok: bool,
+}
+
+#[tauri::command]
+pub fn get_speedhack_state(state: State<'_, ManagedState>) -> SpeedhackStatus {
+    SpeedhackStatus {
+        enabled: state.speedhack.enabled.load(Ordering::Relaxed),
+        multiplier: *state.speedhack.multiplier.lock().unwrap(),
+        game_running: state.speedhack.game_running.load(Ordering::Relaxed),
+        addresses_found: state.speedhack.addresses_found.load(Ordering::Relaxed),
+        last_write_ok: state.speedhack.last_write_ok.load(Ordering::Relaxed),
+        last_verify_ok: state.speedhack.last_verify_ok.load(Ordering::Relaxed),
+    }
+}
+
+#[tauri::command]
+pub fn set_speedhack_enabled(state: State<'_, ManagedState>, enabled: bool) -> bool {
+    state.speedhack.enabled.store(enabled, Ordering::Relaxed);
+    enabled
+}
+
+#[tauri::command]
+pub fn set_speedhack_multiplier(state: State<'_, ManagedState>, multiplier: f32) -> f32 {
+    let clamped = multiplier.clamp(0.1, 10.0);
+    *state.speedhack.multiplier.lock().unwrap() = clamped;
+    clamped
+}
+
+#[tauri::command]
+pub fn verify_speedhack(state: State<'_, ManagedState>) -> SpeedhackStatus {
+    SpeedhackStatus {
+        enabled: state.speedhack.enabled.load(Ordering::Relaxed),
+        multiplier: *state.speedhack.multiplier.lock().unwrap(),
+        game_running: state.speedhack.game_running.load(Ordering::Relaxed),
+        addresses_found: state.speedhack.addresses_found.load(Ordering::Relaxed),
+        last_write_ok: state.speedhack.last_write_ok.load(Ordering::Relaxed),
+        last_verify_ok: state.speedhack.last_verify_ok.load(Ordering::Relaxed),
+    }
 }
 
 // ---- Settings ----
@@ -941,16 +1019,6 @@ pub fn get_inactive_checkout(
 pub fn get_current_user(state: State<'_, ManagedState>) -> Option<AuthUser> {
     let settings = normalize_settings(state.repo().load().settings);
 
-    if settings.offline_mode {
-        return Some(AuthUser {
-            id: "local".to_string(),
-            username: "Local".to_string(),
-            email: None,
-            is_admin: true,
-            entitlement: None,
-        });
-    }
-
     let server_url = settings.server_url.trim().trim_end_matches('/').to_string();
     let auth_token = settings.auth_token.trim().to_string();
     if server_url.is_empty() || auth_token.is_empty() {
@@ -981,25 +1049,7 @@ pub fn logout(state: State<'_, ManagedState>) -> bool {
     }
 
     state_data.settings.auth_token.clear();
-    state_data.settings.offline_mode = false;
     state.repo().save(&state_data).is_ok()
-}
-
-#[tauri::command]
-pub fn skip_login(state: State<'_, ManagedState>) -> AuthUser {
-    let mut state_data = state.repo().load();
-    state_data.settings.offline_mode = true;
-    state_data.settings.server_url.clear();
-    state_data.settings.auth_token.clear();
-    let _ = state.repo().save(&state_data);
-
-    AuthUser {
-        id: "local".to_string(),
-        username: "Local".to_string(),
-        email: None,
-        is_admin: true,
-        entitlement: None,
-    }
 }
 
 fn auth_http_client() -> reqwest::blocking::Client {

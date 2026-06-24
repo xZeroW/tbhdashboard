@@ -31,12 +31,14 @@ pub fn downloaded_assets_base_dir() -> PathBuf {
 }
 
 pub fn default_asset_manifest_url() -> String {
-    std::env::var("TBH_ASSET_MANIFEST_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:3000/assets/manifest".to_string())
+    std::env::var("TBH_ASSET_MANIFEST_URL").unwrap_or_else(|_| {
+        "https://tbhdserver-1029330952442.europe-west1.run.app/assets/manifest".to_string()
+    })
 }
 
 pub fn default_server_url() -> String {
-    std::env::var("TBH_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string())
+    std::env::var("TBH_SERVER_URL")
+        .unwrap_or_else(|_| "https://tbhdserver-1029330952442.europe-west1.run.app".to_string())
 }
 
 pub const REFRESH_SECONDS: f64 = 0.5;

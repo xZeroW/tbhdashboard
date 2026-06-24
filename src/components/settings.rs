@@ -15,8 +15,9 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
     let (asset_message, set_asset_message) = signal(String::new());
     let (proxy_url, set_proxy_url) = signal("http://127.0.0.1:8080".to_string());
     let (asset_manifest_url, set_asset_manifest_url) =
-        signal("http://127.0.0.1:3000/assets/manifest".to_string());
-    let (server_url, set_server_url) = signal("http://127.0.0.1:3000".to_string());
+        signal("https://tbhdserver-1029330952442.europe-west1.run.app/assets/manifest".to_string());
+    let (server_url, set_server_url) =
+        signal("https://tbhdserver-1029330952442.europe-west1.run.app".to_string());
     let (auth_token, set_auth_token) = signal(String::new());
     let (steam_id, set_steam_id) = signal(String::new());
     let (share_claimable_rewards, set_share_claimable_rewards) = signal(false);
@@ -156,7 +157,6 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
         launch_game_on_start: launch_game_on_start.get(),
         steam_launch_options_prompted: steam_launch_options_prompted.get(),
         use_system_proxy: use_system_proxy.get(),
-        offline_mode: false,
         queue_filters: queue_filters.get(),
     };
 

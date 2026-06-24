@@ -190,8 +190,6 @@ pub struct AppSettings {
     #[serde(default)]
     pub share_claimable_rewards: bool,
     #[serde(default)]
-    pub offline_mode: bool,
-    #[serde(default)]
     pub use_system_proxy: bool,
     #[serde(default)]
     pub force_drop_item_id: Option<i64>,
@@ -214,7 +212,6 @@ impl Default for AppSettings {
             auth_token: String::new(),
             steam_id: String::new(),
             share_claimable_rewards: false,
-            offline_mode: false,
             use_system_proxy: false,
             force_drop_item_id: None,
             queue_filters: std::collections::HashMap::new(),

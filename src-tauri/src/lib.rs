@@ -8,6 +8,8 @@ mod models;
 mod nethelper;
 mod observations;
 mod proxy;
+#[cfg(target_os = "linux")]
+mod speedhack;
 mod state;
 #[cfg(desktop)]
 mod updater;
@@ -45,6 +47,13 @@ pub fn run() {
 
             if let Some(id) = settings.force_drop_item_id {
                 *state.force_drop_item_id().lock().unwrap() = Some(id);
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                let speedhack = speedhack::Speedhack::new(state.speedhack_state());
+                speedhack.start_loop();
+                app.manage(Mutex::new(speedhack));
             }
 
             let mut proxy = ProxyManager::new(
@@ -108,13 +117,16 @@ pub fn run() {
             commands::download_latest_assets,
             commands::upload_claimable_reward_observations,
             commands::browse_assets_folder,
-            commands::skip_login,
             commands::get_system_proxy_status,
             commands::start_system_proxy,
             commands::stop_system_proxy,
             commands::get_force_drop_item_id,
             commands::set_force_drop_item_id,
             commands::restart_game,
+            commands::get_speedhack_state,
+            commands::set_speedhack_enabled,
+            commands::set_speedhack_multiplier,
+            commands::verify_speedhack,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

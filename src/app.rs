@@ -136,6 +136,7 @@ pub enum Tab {
     FarmRanking,
     ForceDrop,
     Requests,
+    ExtraFeatures,
     Settings,
 }
 
@@ -145,6 +146,7 @@ const TAB_DEFS: &[(Tab, &str, &str, bool)] = &[
     (Tab::FarmRanking, "Farming", "\u{1f33e}", false),
     (Tab::ForceDrop, "Force Drop", "\u{1f4a5}", false),
     (Tab::Requests, "Requests", "\u{1f50e}", false),
+    (Tab::ExtraFeatures, "Extras", "\u{26a1}", false),
     (Tab::Settings, "Settings", "\u{1f527}", false),
 ];
 
@@ -216,7 +218,8 @@ where
     F: Fn(invoke::AuthUser) + Copy + 'static,
 {
     let (auth_mode, set_auth_mode) = signal(AuthMode::SignIn);
-    let (server_url, set_server_url) = signal("http://127.0.0.1:3000".to_string());
+    let (server_url, set_server_url) =
+        signal("https://tbhdserver-1029330952442.europe-west1.run.app".to_string());
     let (username, set_username) = signal(String::new());
     let (email, set_email) = signal(String::new());
     let (password, set_password) = signal(String::new());
@@ -594,22 +597,6 @@ where
                     }}
                 </button>
 
-                <div class="login-divider">
-                    <span>"or"</span>
-                </div>
-
-                <button class="login-button secondary" disabled=move || logging_in.get() on:click=move |_| {
-                    set_logging_in.set(true);
-                    set_message.set(String::new());
-                    spawn_local(async move {
-                        let user = invoke::invoke_skip_login().await;
-                        set_logging_in.set(false);
-                        on_login(user);
-                    });
-                }>
-                    {move || if logging_in.get() { "Entering offline mode..." } else { "Offline Mode (skip login)" }}
-                </button>
-
                 <div class="login-message"
                     class:error=move || message_is_error.get() && !message.get().is_empty()
                     class:muted=move || !message_is_error.get()
@@ -901,6 +888,9 @@ fn Dashboard(
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::Requests { "block" } else { "none" }}>
                         <components::requests::RequestHistory tick/>
+                    </div>
+                    <div style:display={move || if active_tab.get() == Tab::ExtraFeatures { "block" } else { "none" }}>
+                        <components::extra_features::ExtraFeatures tick/>
                     </div>
                     <div style:display={move || if active_tab.get() == Tab::Settings { "block" } else { "none" }}>
                         <components::settings::Settings tick/>

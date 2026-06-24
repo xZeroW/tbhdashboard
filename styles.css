@@ -483,6 +483,27 @@ body { overflow: hidden; height: 100vh; }
     transform: translateX(18px); background: var(--purple);
 }
 
+/* ============ Slider ============ */
+.slider-container {
+    display: flex; align-items: center; gap: 8px;
+}
+.slider-container input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    height: 6px; background: var(--bg-card);
+    border-radius: 3px; outline: none; cursor: pointer;
+}
+.slider-container input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+    border: 2px solid var(--bg);
+}
+.slider-container input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+    border: 2px solid var(--bg);
+}
+
 /* ============ Filter Tabs ============ */
 .filter-tabs {
     display: flex; gap: 4px;
@@ -556,6 +577,7 @@ body { overflow: hidden; height: 100vh; }
 }
 .pill.green { background: rgba(34,197,94,0.15); color: var(--green); }
 .pill.amber { background: rgba(245,158,11,0.15); color: var(--amber); }
+.pill.red { background: rgba(239,68,68,0.15); color: var(--red); }
 .pill.gray { background: rgba(136,153,170,0.12); color: var(--text-dim); }
 .pill.purple { background: rgba(168,85,247,0.15); color: var(--purple); }
 .pill .pill-dot { font-size: 8px; }

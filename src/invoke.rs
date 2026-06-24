@@ -86,8 +86,6 @@ pub struct AppSettings {
     pub steam_id: String,
     pub share_claimable_rewards: bool,
     #[serde(default)]
-    pub offline_mode: bool,
-    #[serde(default)]
     pub use_system_proxy: bool,
     #[serde(default)]
     pub queue_filters: std::collections::HashMap<String, String>,
@@ -241,12 +239,12 @@ impl Default for AppSettings {
             steam_launch_options: String::new(),
             launch_game_on_start: false,
             steam_launch_options_prompted: false,
-            asset_manifest_url: "http://127.0.0.1:3000/assets/manifest".to_string(),
-            server_url: "http://127.0.0.1:3000".to_string(),
+            asset_manifest_url:
+                "https://tbhdserver-1029330952442.europe-west1.run.app/assets/manifest".to_string(),
+            server_url: "https://tbhdserver-1029330952442.europe-west1.run.app".to_string(),
             auth_token: String::new(),
             steam_id: String::new(),
             share_claimable_rewards: false,
-            offline_mode: false,
             use_system_proxy: false,
             queue_filters: std::collections::HashMap::new(),
         }
@@ -471,12 +469,6 @@ pub async fn invoke_logout() -> bool {
     result.as_bool().unwrap_or(false)
 }
 
-pub async fn invoke_skip_login() -> AuthUser {
-    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-    let result = invoke("skip_login", args).await;
-    serde_wasm_bindgen::from_value(result).unwrap_or_default()
-}
-
 pub async fn invoke_set_settings(settings: AppSettings) -> bool {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "settings": settings
@@ -590,6 +582,63 @@ pub async fn invoke_set_force_drop_item_id(id: Option<i64>) -> bool {
     .unwrap();
     let result = invoke("set_force_drop_item_id", args).await;
     result.as_bool().unwrap_or(false)
+}
+
+// ---- Speedhack ----
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedhackStatus {
+    pub enabled: bool,
+    pub multiplier: f32,
+    pub game_running: bool,
+    pub addresses_found: usize,
+    pub last_write_ok: bool,
+    pub last_verify_ok: bool,
+}
+
+pub async fn invoke_get_speedhack_state() -> SpeedhackStatus {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("get_speedhack_state", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(SpeedhackStatus {
+        enabled: false,
+        multiplier: 2.0,
+        game_running: false,
+        addresses_found: 0,
+        last_write_ok: false,
+        last_verify_ok: false,
+    })
+}
+
+pub async fn invoke_set_speedhack_enabled(enabled: bool) -> bool {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "enabled": enabled
+    }))
+    .unwrap();
+    let result = invoke("set_speedhack_enabled", args).await;
+    result.as_bool().unwrap_or(false)
+}
+
+pub async fn invoke_set_speedhack_multiplier(multiplier: f32) -> f32 {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+        "multiplier": multiplier
+    }))
+    .unwrap();
+    let result = invoke("set_speedhack_multiplier", args).await;
+    result.as_f64().unwrap_or(2.0) as f32
+}
+
+pub async fn invoke_verify_speedhack() -> SpeedhackStatus {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    let result = invoke("verify_speedhack", args).await;
+    serde_wasm_bindgen::from_value(result).unwrap_or(SpeedhackStatus {
+        enabled: false,
+        multiplier: 2.0,
+        game_running: false,
+        addresses_found: 0,
+        last_write_ok: false,
+        last_verify_ok: false,
+    })
 }
 
 pub async fn invoke_restart_game() -> LaunchGameResult {
