@@ -267,7 +267,7 @@ pub fn Settings(tick: ReadSignal<u32>) -> impl IntoView {
                                     } else if sysproxy_status.get().running {
                                         "Stop System Proxy"
                                     } else {
-                                        "Start mitmproxy (web UI)"
+                                        "Start system proxy"
                                     }
                                 }}
                             </button>

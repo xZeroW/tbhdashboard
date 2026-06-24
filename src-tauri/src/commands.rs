@@ -499,14 +499,12 @@ pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
     };
 
     let mut command = Command::new(&cmd_name);
-    command.args([
-        "--listen-port",
-        &port.to_string(),
-        "--set",
-        "block_global=false",
-        "--web-host",
-        "127.0.0.1",
-    ]);
+    command.arg("--listen-port");
+    command.arg(&port.to_string());
+    command.args(["--set", "block_global=false"]);
+    if cmd_name == "mitmweb" {
+        command.args(["--web-host", "127.0.0.1"]);
+    }
     if let Some(path) = &addon_path {
         command.args(["-s", &path.to_string_lossy()]);
     }
@@ -564,11 +562,11 @@ pub fn stop_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
 }
 
 fn detect_mitmproxy_binary() -> Option<(String, String)> {
-    for name in &["mitmweb", "mitmproxy", "mitmdump"] {
+    for name in &["mitmproxy", "mitmweb", "mitmdump"] {
         if Command::new(name).arg("--version").output().is_ok() {
             let display = match *name {
-                "mitmweb" => "mitmproxy (web UI)",
                 "mitmproxy" => "mitmproxy (terminal)",
+                "mitmweb" => "mitmproxy (web UI)",
                 _ => "mitmdump",
             };
             return Some((name.to_string(), display.to_string()));
