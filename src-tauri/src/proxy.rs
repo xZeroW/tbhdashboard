@@ -283,7 +283,8 @@ impl HttpHandler for TbhHandler {
 
         let is_interesting = is_interesting(&info.host, &info.path);
 
-        if info.path.contains("/data/gameLog/v2/TemperedItem") {
+        if info.path.contains("/data/gameLog") {
+            eprintln!("[TBH] Blocked request: {}", info.source);
             self.clear_tracked_request();
             return Response::builder()
                 .status(StatusCode::OK)
@@ -637,7 +638,7 @@ fn box_label(box_id: Option<i64>) -> String {
     }
 }
 
-fn extract_chests_from_any_json(obj: &Value) -> Vec<Value> {
+pub fn extract_chests_from_any_json(obj: &Value) -> Vec<Value> {
     let mut found = Vec::new();
 
     match obj {
@@ -695,7 +696,7 @@ fn extract_chests_from_any_json(obj: &Value) -> Vec<Value> {
     found
 }
 
-fn extract_added_from_any_json(obj: &Value) -> Vec<Value> {
+pub fn extract_added_from_any_json(obj: &Value) -> Vec<Value> {
     let mut found = Vec::new();
     extract_added_inner(obj, &mut found);
 

@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
@@ -12,15 +14,18 @@ use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::assets::{AssetDownloadResult, AssetUpdateStatus};
+use crate::capture;
 use crate::catalog::StaticCatalog;
 use crate::chests;
 use crate::config;
 use crate::models::*;
 use crate::nethelper;
 use crate::observations::ObservationUploadResult;
+use crate::proxy;
 use crate::state::StateRepository;
 
 const STEAM_APP_ID: &str = "3678970";
+const SYSTEM_PROXY_EVENT_PORT: u16 = 1421;
 
 /// Shared app state managed by Tauri.
 pub struct ManagedState {
@@ -29,6 +34,7 @@ pub struct ManagedState {
     proxy_status: Arc<Mutex<ProxyStatus>>,
     freeze_queue: Arc<AtomicBool>,
     system_proxy: Arc<Mutex<Option<std::process::Child>>>,
+    system_proxy_running: Arc<AtomicBool>,
     force_drop_item_id: Arc<Mutex<Option<i64>>>,
 }
 
@@ -169,6 +175,7 @@ impl ManagedState {
             proxy_status: Arc::new(Mutex::new(ProxyStatus::starting())),
             freeze_queue: Arc::new(AtomicBool::new(false)),
             system_proxy: Arc::new(Mutex::new(None)),
+            system_proxy_running: Arc::new(AtomicBool::new(false)),
             force_drop_item_id: Arc::new(Mutex::new(None)),
         }
     }
@@ -253,6 +260,203 @@ pub fn get_system_proxy_status(state: State<'_, ManagedState>) -> SystemProxySta
     }
 }
 
+fn generate_mitmproxy_addon() -> Option<PathBuf> {
+    let script = r#"import json, urllib.request, datetime
+from mitmproxy import http
+
+DASHBOARD_URL = "http://127.0.0.1:1421/event"
+TARGET_HOST = "thebackend.io"
+BLOCKED_PATH = "/data/gameLog"
+
+def request(flow: http.HTTPFlow):
+    if TARGET_HOST not in flow.request.pretty_url:
+        return
+    if flow.request.path and BLOCKED_PATH in flow.request.path:
+        print(f"[TBH] Blocked request: {flow.request.method} {flow.request.pretty_host}{flow.request.path}", flush=True)
+        flow.response = http.Response.make(200, b"{}", {"Content-Type": "application/json"})
+        return
+    source = f"{flow.request.method} {flow.request.pretty_host}{flow.request.path}"
+    _send(json.dumps({
+        "type": "request_log",
+        "at": datetime.datetime.utcnow().isoformat(),
+        "source": source,
+        "method": flow.request.method,
+        "host": flow.request.pretty_host,
+        "path": flow.request.path,
+        "contentType": flow.request.headers.get("Content-Type", ""),
+        "bodyBytes": len(flow.request.content or b""),
+        "body": (flow.request.text or "")[:4096],
+    }))
+
+def response(flow: http.HTTPFlow):
+    if TARGET_HOST not in flow.request.pretty_url:
+        return
+    source = f"{flow.request.method} {flow.request.pretty_host}{flow.request.path}"
+    body = flow.response.text or ""
+    _send(json.dumps({
+        "type": "response_log",
+        "source": source,
+        "body": body,
+        "body_bytes": len(flow.response.content or b""),
+    }))
+
+def _send(data: str):
+    try:
+        req = urllib.request.Request(
+            DASHBOARD_URL, data=data.encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1)
+    except Exception:
+        pass
+"#;
+    let mut path = std::env::temp_dir();
+    path.push("tbh_mitmproxy_addon.py");
+    match std::fs::write(&path, script) {
+        Ok(_) => Some(path),
+        Err(e) => {
+            eprintln!("[TBH] Failed to write mitmproxy addon: {e}");
+            None
+        }
+    }
+}
+
+fn start_system_proxy_event_bridge(state: &ManagedState) {
+    state.system_proxy_running.store(true, Ordering::Relaxed);
+
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let repo_path = state.repo().path.clone();
+    let running = state.system_proxy_running.clone();
+
+    std::thread::spawn(move || {
+        let repo = StateRepository::new(repo_path);
+        while let Ok(line) = rx.recv() {
+            let parsed = capture::parse_sidecar_line(&line);
+            capture::apply_sidecar_event(parsed, &repo);
+
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line)
+                && v.get("type").and_then(|t| t.as_str()) == Some("response_log")
+            {
+                let source = match v.get("source").and_then(|s| s.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let body = match v.get("body").and_then(|b| b.as_str()) {
+                    Some(b) => b.to_string(),
+                    None => continue,
+                };
+                let Some(obj) = serde_json::from_str::<serde_json::Value>(&body).ok() else {
+                    continue;
+                };
+
+                let added = proxy::extract_added_from_any_json(&obj);
+                if !added.is_empty() {
+                    let ev = serde_json::json!({
+                        "type": "added_items",
+                        "count": added.len(),
+                        "source": source,
+                        "items": added,
+                    });
+                    let line = serde_json::to_string(&ev).unwrap();
+                    let parsed = capture::parse_sidecar_line(&line);
+                    capture::apply_sidecar_event(parsed, &repo);
+                }
+
+                let chests = proxy::extract_chests_from_any_json(&obj);
+                if !chests.is_empty() {
+                    let ev = if chests.len() >= 40 {
+                        serde_json::json!({
+                            "type": "chests_synced",
+                            "count": chests.len(),
+                            "old": 0,
+                            "source": source,
+                            "chests": chests,
+                        })
+                    } else {
+                        serde_json::json!({
+                            "type": "chests_upserted",
+                            "added": chests.len(),
+                            "updated": 0,
+                            "source": source,
+                            "chests": chests,
+                        })
+                    };
+                    let line = serde_json::to_string(&ev).unwrap();
+                    let parsed = capture::parse_sidecar_line(&line);
+                    capture::apply_sidecar_event(parsed, &repo);
+                }
+            }
+        }
+    });
+
+    let running_clone = running.clone();
+    std::thread::spawn(
+        move || match TcpListener::bind(("127.0.0.1", SYSTEM_PROXY_EVENT_PORT)) {
+            Ok(listener) => {
+                listener.set_nonblocking(true).ok();
+                for stream in listener.incoming() {
+                    if !running_clone.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match stream {
+                        Ok(mut stream) => {
+                            let tx = tx.clone();
+                            std::thread::spawn(move || {
+                                let mut reader = BufReader::new(&stream);
+                                let mut request_line = String::new();
+                                if reader.read_line(&mut request_line).is_err() {
+                                    return;
+                                }
+                                let mut content_length = 0usize;
+                                loop {
+                                    let mut line = String::new();
+                                    if reader.read_line(&mut line).is_err()
+                                        || line == "\r\n"
+                                        || line == "\n"
+                                    {
+                                        break;
+                                    }
+                                    if let Some(len_str) =
+                                        line.trim().strip_prefix("Content-Length:")
+                                    {
+                                        content_length = len_str.trim().parse().unwrap_or(0);
+                                    }
+                                }
+                                let mut buf = Vec::new();
+                                if content_length > 0 {
+                                    let mut body_buf = vec![0u8; content_length];
+                                    if reader.read_exact(&mut body_buf).is_ok() {
+                                        buf = body_buf;
+                                    }
+                                }
+                                let _ = stream
+                                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+                                if let Ok(body_str) = String::from_utf8(buf) {
+                                    let _ = tx.send(body_str);
+                                }
+                            });
+                        }
+                        Err(_) => {
+                            if !running_clone.load(Ordering::Relaxed) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[TBH] Failed to bind event listener: {e}");
+            }
+        },
+    );
+}
+
+fn stop_system_proxy_event_bridge(state: &ManagedState) {
+    state.system_proxy_running.store(false, Ordering::Relaxed);
+    let _ = TcpStream::connect(("127.0.0.1", SYSTEM_PROXY_EVENT_PORT));
+}
+
 #[tauri::command]
 pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
     let mut guard = state.system_proxy.lock().unwrap();
@@ -265,6 +469,11 @@ pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
             message: "Already running".to_string(),
         };
     }
+
+    stop_system_proxy_event_bridge(&state);
+    start_system_proxy_event_bridge(&state);
+
+    let addon_path = generate_mitmproxy_addon();
 
     let settings = state.repo().load().settings;
     let proxy_url = settings.proxy_url.trim().to_string();
@@ -280,6 +489,7 @@ pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
     let cmd_name = match &cmd {
         Some((name, _)) => name.clone(),
         None => {
+            stop_system_proxy_event_bridge(&state);
             return SystemProxyStatus {
                 running: false,
                 pid: None,
@@ -288,19 +498,23 @@ pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
         }
     };
 
-    let child = match std::process::Command::new(&cmd_name)
-        .args([
-            "--listen-port",
-            &port.to_string(),
-            "--set",
-            "block_global=false",
-            "--web-host",
-            "127.0.0.1",
-        ])
-        .spawn()
-    {
+    let mut command = Command::new(&cmd_name);
+    command.args([
+        "--listen-port",
+        &port.to_string(),
+        "--set",
+        "block_global=false",
+        "--web-host",
+        "127.0.0.1",
+    ]);
+    if let Some(path) = &addon_path {
+        command.args(["-s", &path.to_string_lossy()]);
+    }
+
+    let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
+            stop_system_proxy_event_bridge(&state);
             return SystemProxyStatus {
                 running: false,
                 pid: None,
@@ -327,6 +541,7 @@ pub fn start_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
 
 #[tauri::command]
 pub fn stop_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
+    stop_system_proxy_event_bridge(&state);
     let mut guard = state.system_proxy.lock().unwrap();
     if let Some(mut child) = guard.take() {
         let pid = child.id();
@@ -350,11 +565,7 @@ pub fn stop_system_proxy(state: State<'_, ManagedState>) -> SystemProxyStatus {
 
 fn detect_mitmproxy_binary() -> Option<(String, String)> {
     for name in &["mitmweb", "mitmproxy", "mitmdump"] {
-        if std::process::Command::new(name)
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
+        if Command::new(name).arg("--version").output().is_ok() {
             let display = match *name {
                 "mitmweb" => "mitmproxy (web UI)",
                 "mitmproxy" => "mitmproxy (terminal)",
@@ -417,6 +628,7 @@ pub fn set_settings(
                 message: "Using system mitmproxy".to_string(),
             };
         } else {
+            stop_system_proxy_event_bridge(&state);
             let mut system_proxy = state.system_proxy.lock().unwrap();
             if let Some(mut child) = system_proxy.take() {
                 let _ = child.kill();
@@ -1204,15 +1416,13 @@ fn kill_game_process() {
     let names = ["TaskbarHero", "Task Bar Hero"];
     #[cfg(target_os = "windows")]
     for name in &names {
-        let _ = std::process::Command::new("taskkill")
+        let _ = Command::new("taskkill")
             .args(["/F", "/IM", &format!("{}.exe", name)])
             .output();
     }
     #[cfg(not(target_os = "windows"))]
     for name in &names {
-        let _ = std::process::Command::new("pkill")
-            .args(["-f", "-i", name])
-            .output();
+        let _ = Command::new("pkill").args(["-f", "-i", name]).output();
     }
 }
 
@@ -1220,15 +1430,13 @@ pub fn kill_mitmproxy_processes() {
     let names = ["mitmweb", "mitmproxy", "mitmdump"];
     #[cfg(target_os = "windows")]
     for name in &names {
-        let _ = std::process::Command::new("taskkill")
+        let _ = Command::new("taskkill")
             .args(["/F", "/IM", &format!("{}.exe", name)])
             .output();
     }
     #[cfg(not(target_os = "windows"))]
     for name in &names {
-        let _ = std::process::Command::new("pkill")
-            .args(["-f", "-i", name])
-            .output();
+        let _ = Command::new("pkill").args(["-f", "-i", name]).output();
     }
 }
 
@@ -1268,7 +1476,7 @@ fn is_game_running() -> bool {
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("tasklist")
+        Command::new("tasklist")
             .arg("/FI")
             .arg("IMAGENAME eq TaskbarHero.exe")
             .arg("/NH")
@@ -1283,7 +1491,7 @@ fn is_game_running() -> bool {
     #[cfg(not(target_os = "windows"))]
     {
         let pgrep = names.iter().any(|name| {
-            std::process::Command::new("pgrep")
+            Command::new("pgrep")
                 .args(["-f", "-i", name])
                 .output()
                 .map(|o| o.status.success())
@@ -1320,7 +1528,7 @@ fn is_game_running() -> bool {
 
 #[cfg(target_os = "windows")]
 fn find_game_pid() -> Option<u32> {
-    let output = std::process::Command::new("tasklist")
+    let output = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq taskbarhero.exe", "/FO", "CSV", "/NH"])
         .output()
         .ok()?;
