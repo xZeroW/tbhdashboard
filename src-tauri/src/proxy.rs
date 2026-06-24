@@ -450,10 +450,11 @@ impl HttpHandler for TbhHandler {
 
         // Force drop: rewrite rewardItemId in claimed boxes
         let body_bytes = {
-            let force_id = *self.force_drop_item_id.lock().unwrap();
-            if let Some(target_id) = force_id {
+            let mut guard = self.force_drop_item_id.lock().unwrap();
+            if let Some(target_id) = *guard {
                 if let Ok(mut obj) = serde_json::from_slice::<Value>(&body_bytes) {
                     if modify_force_drop(&mut obj, target_id) {
+                        *guard = None;
                         serde_json::to_vec(&obj).unwrap_or(body_bytes.to_vec())
                     } else {
                         body_bytes.to_vec()

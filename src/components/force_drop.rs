@@ -48,6 +48,17 @@ pub fn ForceDrop(tick: ReadSignal<u32>) -> impl IntoView {
         }
     };
 
+    let disable_force_drop = move || {
+        set_saving.set(true);
+        spawn_local(async move {
+            invoke::invoke_set_force_drop_item_id(None).await;
+            set_item_id.set(String::new());
+            set_saved_id.set(None);
+            set_saving.set(false);
+            set_save_message.set("Force drop disabled".to_string());
+        });
+    };
+
     let restart_game = move || {
         if restarting.get() {
             return;
@@ -89,6 +100,14 @@ pub fn ForceDrop(tick: ReadSignal<u32>) -> impl IntoView {
                     >
                         {move || if saving.get() { "Saving..." } else { "Set Force Drop" }}
                     </button>
+                    {move || saved_id.get().is_some().then(|| view! {
+                        <button class="btn-action" disabled=saving.get()
+                            on:click=move |_| disable_force_drop()
+                            style="margin-left: 8px;"
+                        >
+                            "Disable"
+                        </button>
+                    })}
                     <span class="settings-hint">{save_message}</span>
                 </div>
                 <div class="settings-row">
